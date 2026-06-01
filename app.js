@@ -228,18 +228,20 @@ function renderSourceCards() {
 const twitchEmoteCache = {};
 const emoteRegex = /\b([a-zA-Z0-9_]+)\b/g;
 
-// Fetch Twitch emote URLs via backend proxy to bypass CORS
+// Fetch Twitch emote URLs via BTTV API
 async function getTwitchEmoteUrl(emoteName) {
   if (twitchEmoteCache[emoteName]) {
     return twitchEmoteCache[emoteName];
   }
   try {
-    const response = await fetch(`https://live-chat-hub.onrender.com/api/twitch-emote/${encodeURIComponent(emoteName)}`);
+    // Try BTTV API for global emotes
+    const response = await fetch(`https://api.betterttv.net/emote/search?query=${encodeURIComponent(emoteName)}&limit=1`);
     if (response.ok) {
       const data = await response.json();
-      if (data.success && data.url) {
-        twitchEmoteCache[emoteName] = data.url;
-        return data.url;
+      if (data && data.emotes && data.emotes.length > 0) {
+        const emoteUrl = `https://cdn.betterttv.net/emote/${data.emotes[0].id}/1x`;
+        twitchEmoteCache[emoteName] = emoteUrl;
+        return emoteUrl;
       }
     }
   } catch (err) {
@@ -282,23 +284,31 @@ function renderMessageToTimeline(msg) {
   const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const iconSrc = msg.iconUrl || platformIcons[msg.platform.toLowerCase()] || 'assets/twch_icon.png';
 
-  // Handle Twitch emotes asynchronously
+  // Handle Twitch messages with emote async parsing
   if (msg.platform === 'twitch') {
-    parseTwitchEmotes(msg.message, msg.platform).then((messageHtml) => {
-      item.innerHTML = `
-        <img src="${iconSrc}" class="platform-icon" alt="${msg.platform}">
-        <div class="chat-content">
-          <div class="chat-header">
-            <span class="chat-username">${escapeHtml(msg.username)}</span>
-            <span class="chat-platform">${escapeHtml(msg.platform)}</span>
-            <span class="chat-timestamp">${time}</span>
-          </div>
-          <div class="chat-text">${messageHtml}</div>
+    // Add to DOM immediately to preserve message order
+    item.innerHTML = `
+      <img src="${iconSrc}" class="platform-icon" alt="${msg.platform}">
+      <div class="chat-content">
+        <div class="chat-header">
+          <span class="chat-username">${escapeHtml(msg.username)}</span>
+          <span class="chat-platform">${escapeHtml(msg.platform)}</span>
+          <span class="chat-timestamp">${time}</span>
         </div>
-      `;
-      chatTimeline.appendChild(item);
-      chatTimeline.scrollTop = chatTimeline.scrollHeight;
+        <div class="chat-text">${escapeHtml(msg.message)}</div>
+      </div>
+    `;
+    chatTimeline.appendChild(item);
+    
+    // Parse and update emotes asynchronously
+    parseTwitchEmotes(msg.message, msg.platform).then((messageHtml) => {
+      const chatText = item.querySelector('.chat-text');
+      if (chatText) {
+        chatText.innerHTML = messageHtml;
+      }
     });
+    
+    chatTimeline.scrollTop = chatTimeline.scrollHeight;
     return;
   }
   
