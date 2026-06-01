@@ -1,7 +1,7 @@
 const { WebcastPushConnection } = require('tiktok-live-connector');
 const BaseProvider = require('./baseProvider');
 
-const TIKTOK_ICON_URL = 'https://www.tiktok.com/favicon.ico';
+const TIKTOK_ICON_URL = 'assets/tktk_icon.png';
 
 class TikTokProvider extends BaseProvider {
   constructor(target, onMessage) {

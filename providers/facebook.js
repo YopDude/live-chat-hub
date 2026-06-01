@@ -1,7 +1,7 @@
 const axios = require('axios');
 const BaseProvider = require('./baseProvider');
 
-const FACEBOOK_ICON_URL = 'https://www.facebook.com/images/fb_icon_325x325.png';
+const FACEBOOK_ICON_URL = 'assets/fb_icon.png';
 const POLL_INTERVAL_MS = 5000;
 
 class FacebookProvider extends BaseProvider {

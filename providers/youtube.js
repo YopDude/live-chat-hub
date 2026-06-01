@@ -1,7 +1,7 @@
 const axios = require('axios');
 const BaseProvider = require('./baseProvider');
 
-const YOUTUBE_ICON_URL = 'https://www.youtube.com/yts/img/yt_1200-vfl4C3T0K.png';
+const YOUTUBE_ICON_URL = 'assets/tube_icon.png';
 const POLL_INTERVAL_MS = 3500;
 
 class YouTubeProvider extends BaseProvider {

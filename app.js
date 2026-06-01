@@ -88,18 +88,27 @@ function renderSourceCards() {
   });
 }
 
+const platformIcons = {
+  twitch: 'assets/twch_icon.png',
+  youtube: 'assets/tube_icon.png',
+  tiktok: 'assets/tktk_icon.png',
+  facebook: 'assets/fb_icon.png',
+  instagram: 'assets/ins_icon.png',
+};
+
 function renderMessageToTimeline(msg) {
   const item = document.createElement('div');
   item.className = `chat-message ${msg.isSystemAlert ? 'system-alert' : ''}`;
 
   const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const iconSrc = msg.iconUrl || platformIcons[msg.platform.toLowerCase()] || 'assets/twch_icon.png';
 
   item.innerHTML = `
-    <img src="${msg.iconUrl}" class="platform-icon" alt="${msg.platform}">
+    <img src="${iconSrc}" class="platform-icon" alt="${msg.platform}">
     <div class="chat-content">
       <div class="chat-header">
         <span class="chat-username">${escapeHtml(msg.username)}</span>
-        <span class="chat-platform">${msg.platform}</span>
+        <span class="chat-platform">${escapeHtml(msg.platform)}</span>
         <span class="chat-timestamp">${time}</span>
       </div>
       <div class="chat-text">${escapeHtml(msg.message)}</div>

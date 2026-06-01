@@ -1,7 +1,7 @@
 const tmi = require('tmi.js');
 const BaseProvider = require('./baseProvider');
 
-const TWITCH_ICON_URL = 'https://static.twitchcdn.net/assets/glitch_474x356.png';
+const TWITCH_ICON_URL = 'assets/twch_icon.png';
 
 class TwitchProvider extends BaseProvider {
   constructor(target, onMessage) {

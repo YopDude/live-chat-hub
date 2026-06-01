@@ -1,7 +1,7 @@
 const axios = require('axios');
 const BaseProvider = require('./baseProvider');
 
-const INSTAGRAM_ICON_URL = 'https://www.instagram.com/static/images/ico/favicon-192.png/36b3ee2d91ed.png';
+const INSTAGRAM_ICON_URL = 'assets/ins_icon.png';
 const POLL_INTERVAL_MS = 5000;
 
 class InstagramProvider extends BaseProvider {
