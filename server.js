@@ -61,7 +61,7 @@ io.on('connection', (socket) => {
         sourceId: id,
         platform,
         target,
-        message,
+        ...message,
       });
     });
 
