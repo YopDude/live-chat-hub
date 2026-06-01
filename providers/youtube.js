@@ -76,7 +76,7 @@ class YouTubeProvider extends BaseProvider {
     return null;
   }
 
-  async fetchChannelLiveStream(channelHandle) {
+async fetchChannelLiveStream(channelHandle) {
     try {
       console.log(`[YouTubeProvider] Dynamic lookup tracking active for channel: @${channelHandle}`);
       const channelUrl = `https://www.youtube.com/@${channelHandle}/live`;
@@ -88,12 +88,16 @@ class YouTubeProvider extends BaseProvider {
         },
       });
 
-      // FIX: Extract the video ID strictly from head canonical or OpenGraph properties.
-      // This prevents matching random live recommendations in the sidebar layout.
-      const canonicalMatch = response.data.match(/<link rel="canonical" href="[^"]*watch\?v=([a-zA-Z0-9_-]{11})"/);
-      const ogMatch = response.data.match(/<meta property="og:url" content="[^"]*watch\?v=([a-zA-Z0-9_-]{11})"/);
-      
-      const videoId = (canonicalMatch && canonicalMatch[1]) || (ogMatch && ogMatch[1]);
+      // Guard: Check if your scraper hit an unauthenticated cookie consent or bot wall
+      if (response.data.includes('consent.youtube.com') || response.data.includes('captcha')) {
+        console.warn(`[YouTubeProvider] Warning: YouTube issued a bot challenge or consent wall for @${channelHandle}.`);
+        return null;
+      }
+
+      // Extract the video ID safely from the primary player's internal videoDetails block.
+      // This ignores sidebar recommendations while successfully capturing the active video ID.
+      const playerMatch = response.data.match(/"videoDetails"\s*:\s*\{[^}]*"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/);
+      const videoId = playerMatch ? playerMatch[1] : null;
 
       if (!videoId) {
         return null;
