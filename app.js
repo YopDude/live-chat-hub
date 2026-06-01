@@ -72,6 +72,28 @@ socket.on('chat-message', (data) => {
   renderMessageToTimeline(data);
 });
 
+// Socket connection handlers
+socket.on('connect', () => {
+  console.log('Connected to server');
+  showStatus('Connected to server ✓', 'info');
+});
+
+socket.on('disconnect', (reason) => {
+  console.log('Disconnected from server:', reason);
+  if (reason === 'io server disconnect') {
+    showStatus('Disconnected from server. Please refresh the page.', 'error');
+  } else if (reason === 'io client disconnect') {
+    showStatus('Disconnected. Reconnecting...', 'info');
+  } else {
+    showStatus(`Disconnected: ${reason}. Please check your connection and refresh if needed.`, 'error');
+  }
+});
+
+socket.on('connect_error', (err) => {
+  console.error('Connection error:', err);
+  showStatus('Unable to connect to server. Check your connection and refresh the page.', 'error');
+});
+
 // Socket error handler
 socket.on('error', (err) => {
   console.error('Socket error:', err);
@@ -210,6 +232,58 @@ const platformIcons = {
   instagram: 'assets/ins_icon.png',
 };
 
+// Cache for Twitch emotes to avoid repeated API calls
+const twitchEmoteCache = {};
+const emoteRegex = /\b([a-zA-Z0-9_]+)\b/g;
+
+// Fetch Twitch emote URLs from twitchemotes.com
+async function getTwitchEmoteUrl(emoteName) {
+  if (twitchEmoteCache[emoteName]) {
+    return twitchEmoteCache[emoteName];
+  }
+  try {
+    const response = await fetch(`https://twitchemotes.com/api/v2/default?name=${encodeURIComponent(emoteName)}`);
+    if (response.ok) {
+      const data = await response.json();
+      if (data && data.emotes && data.emotes.length > 0) {
+        const emoteUrl = `https://cdn.betterttv.net/emote/${data.emotes[0].id}/1x`;
+        twitchEmoteCache[emoteName] = emoteUrl;
+        return emoteUrl;
+      }
+    }
+  } catch (err) {
+    console.log(`Could not fetch emote ${emoteName}:`, err);
+  }
+  return null;
+}
+
+// Convert Twitch emote codes in messages to HTML images
+async function parseTwitchEmotes(text, platform) {
+  if (platform !== 'twitch') return escapeHtml(text);
+  
+  // Simple emote detection: look for common Twitch emote patterns (capitalized words)
+  const words = text.split(/(\s+)/); // Split while preserving whitespace
+  const result = [];
+  
+  for (const word of words) {
+    if (/\s/.test(word)) {
+      result.push(escapeHtml(word));
+    } else if (/^[A-Z][a-zA-Z0-9_]{2,}$/.test(word)) {
+      // Check if this looks like a potential Twitch emote
+      const emoteUrl = await getTwitchEmoteUrl(word);
+      if (emoteUrl) {
+        result.push(`<img src="${emoteUrl}" alt="${escapeHtml(word)}" class="twitch-emote" title="${escapeHtml(word)}">`);
+      } else {
+        result.push(escapeHtml(word));
+      }
+    } else {
+      result.push(escapeHtml(word));
+    }
+  }
+  
+  return result.join('');
+}
+
 function renderMessageToTimeline(msg) {
   const item = document.createElement('div');
   item.className = `chat-message ${msg.isSystemAlert ? 'system-alert' : ''}`;
@@ -217,6 +291,25 @@ function renderMessageToTimeline(msg) {
   const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const iconSrc = msg.iconUrl || platformIcons[msg.platform.toLowerCase()] || 'assets/twch_icon.png';
 
+  // Handle Twitch emotes asynchronously
+  if (msg.platform === 'twitch') {
+    parseTwitchEmotes(msg.message, msg.platform).then((messageHtml) => {
+      item.innerHTML = `
+        <img src="${iconSrc}" class="platform-icon" alt="${msg.platform}">
+        <div class="chat-content">
+          <div class="chat-header">
+            <span class="chat-username">${escapeHtml(msg.username)}</span>
+            <span class="chat-platform">${escapeHtml(msg.platform)}</span>
+            <span class="chat-timestamp">${time}</span>
+          </div>
+          <div class="chat-text">${messageHtml}</div>
+        </div>
+      `;
+      chatTimeline.insertBefore(item, chatTimeline.firstChild);
+    });
+    return;
+  }
+  
   item.innerHTML = `
     <img src="${iconSrc}" class="platform-icon" alt="${msg.platform}">
     <div class="chat-content">

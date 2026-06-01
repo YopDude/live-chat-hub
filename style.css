@@ -177,7 +177,13 @@ header h1 {
 .platform-icon-small {
   width: 20px;
   height: 20px;
+  min-width: 20px;
+  min-height: 20px;
+  max-width: 20px;
+  max-height: 20px;
+  object-fit: contain;
   border-radius: 3px;
+  flex-shrink: 0;
 }
 
 .platform-dropdown {
@@ -307,7 +313,10 @@ header h1 {
 .source-info .target {
   font-size: 0.95rem;
   font-weight: 600;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
 }
 
 .remove-btn {
@@ -433,6 +442,16 @@ header h1 {
   word-break: break-word;
   word-wrap: break-word;
   overflow-wrap: break-word;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.twitch-emote {
+  height: 1.5em;
+  vertical-align: middle;
+  display: inline-block;
 }
 
 .chat-message.system-alert .chat-text {
