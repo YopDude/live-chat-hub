@@ -12,8 +12,11 @@ class TwitchProvider extends BaseProvider {
 
   start() {
     if (this.isActive) {
+      console.log(`[TwitchProvider] Already active for ${this.target}, skipping restart`);
       return;
     }
+
+    console.log(`[TwitchProvider] Starting for channel: ${this.target}`);
 
     this.client = new tmi.Client({
       connection: {
@@ -23,10 +26,12 @@ class TwitchProvider extends BaseProvider {
     });
 
     this.client.on('message', (channel, userstate, message, self) => {
+      console.log(`[TwitchProvider:message] channel=${channel}, self=${self}, message="${message}"`);
       if (self) return;
 
       const username = userstate['display-name'] || userstate.username || userstate['user-id'] || 'unknown';
       const id = userstate.id || userstate['user-id'] || userstate['message-id'] || null;
+      console.log(`[TwitchProvider:message] Emitting: username="${username}", message="${message}"`);
       this.onMessage({
         id,
         platform: 'twitch',
@@ -39,6 +44,7 @@ class TwitchProvider extends BaseProvider {
     });
 
     this.client.on('subscription', (channel, username, method, message, userstate) => {
+      console.log(`[TwitchProvider:subscription] username="${username}", method="${method}"`);
       this.onMessage({
         id: userstate.id || userstate['user-id'] || null,
         platform: 'twitch',
@@ -50,9 +56,18 @@ class TwitchProvider extends BaseProvider {
       });
     });
 
+    this.client.on('connected', () => {
+      console.log(`[TwitchProvider] Connected to channel: ${this.target}`);
+    });
+
+    this.client.on('disconnected', () => {
+      console.log(`[TwitchProvider] Disconnected from channel: ${this.target}`);
+    });
+
     this.client.connect().catch((err) => {
       console.error('TwitchProvider connection error:', err);
     });
+    console.log(`[TwitchProvider] start() completed, calling super.start()`);
     super.start();
   }
 
