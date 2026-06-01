@@ -91,10 +91,17 @@ class YouTubeProvider extends BaseProvider {
       });
 
       // Extract video ID from the response
-      const idMatch = response.data.match(/(?:"videoId"|"VIDEO_ID"\s*:\s*)"([a-zA-Z0-9_-]{11})/);
+      const idMatch = response.data.match(/(?:"videoId"|"VIDEO_ID")\s*:\s*"([a-zA-Z0-9_-]{11})"/);
       if (idMatch && idMatch[1]) {
         console.log(`[YouTubeProvider] Found live stream video ID: ${idMatch[1]}`);
         return idMatch[1];
+      }
+
+      // Fallback: search for the generic object key with videoId
+      const fallbackMatch = response.data.match(/"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/);
+      if (fallbackMatch && fallbackMatch[1]) {
+        console.log(`[YouTubeProvider] Found live stream video ID via fallback: ${fallbackMatch[1]}`);
+        return fallbackMatch[1];
       }
       
       console.warn(`[YouTubeProvider] No live stream found for channel: ${channelHandle}`);
