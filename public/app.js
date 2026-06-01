@@ -1,4 +1,4 @@
-const socket = io(window.location.origin); // Changes automatically based on deployment URL
+const socket = io('https://live-chat-hub.onrender.com'); // Changes automatically based on deployment URL
 let streamSources = JSON.parse(localStorage.getItem('chatSources')) || [];
 const chatTimeline = document.getElementById('chat-timeline');
 
