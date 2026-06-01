@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Stream Chat Hub</title>
+    <link rel="icon" href="assets/favicon.ico" type="image/png">
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 </head>
@@ -14,6 +15,10 @@
     </header>
 
     <div id="source-manager-panel" class="dropdown-panel hidden">
+        <div class="panel-header">
+            <span>Manage chat sources</span>
+            <button id="close-panel-btn" class="control-btn">✕</button>
+        </div>
         <div class="add-source-form">
             <select id="platform-select">
                 <option value="twitch">Twitch</option>

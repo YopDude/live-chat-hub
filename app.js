@@ -32,11 +32,21 @@ socket.on('error', (err) => {
 });
 
 // UI Event Handlers
-document.getElementById('manager-toggle-btn').addEventListener('click', () => {
-  const panel = document.getElementById('source-manager-panel');
-  panel.classList.toggle('hidden');
-  panel.classList.toggle('visible');
-});
+const sourcePanel = document.getElementById('source-manager-panel');
+const managerToggleBtn = document.getElementById('manager-toggle-btn');
+const closePanelBtn = document.getElementById('close-panel-btn');
+
+function toggleSourcePanel() {
+  sourcePanel.classList.toggle('hidden');
+  sourcePanel.classList.toggle('visible');
+  const isOpen = sourcePanel.classList.contains('visible');
+  managerToggleBtn.textContent = isOpen ? '✕ Close Sources' : '⚙️ Manage Sources';
+}
+
+managerToggleBtn.addEventListener('click', toggleSourcePanel);
+if (closePanelBtn) {
+  closePanelBtn.addEventListener('click', toggleSourcePanel);
+}
 
 document.getElementById('add-btn').addEventListener('click', () => {
   const platform = document.getElementById('platform-select').value;
