@@ -228,19 +228,18 @@ function renderSourceCards() {
 const twitchEmoteCache = {};
 const emoteRegex = /\b([a-zA-Z0-9_]+)\b/g;
 
-// Fetch Twitch emote URLs from twitchemotes.com
+// Fetch Twitch emote URLs via backend proxy to bypass CORS
 async function getTwitchEmoteUrl(emoteName) {
   if (twitchEmoteCache[emoteName]) {
     return twitchEmoteCache[emoteName];
   }
   try {
-    const response = await fetch(`https://twitchemotes.com/api/v2/default?name=${encodeURIComponent(emoteName)}`);
+    const response = await fetch(`https://live-chat-hub.onrender.com/api/twitch-emote/${encodeURIComponent(emoteName)}`);
     if (response.ok) {
       const data = await response.json();
-      if (data && data.emotes && data.emotes.length > 0) {
-        const emoteUrl = `https://cdn.betterttv.net/emote/${data.emotes[0].id}/1x`;
-        twitchEmoteCache[emoteName] = emoteUrl;
-        return emoteUrl;
+      if (data.success && data.url) {
+        twitchEmoteCache[emoteName] = data.url;
+        return data.url;
       }
     }
   } catch (err) {
@@ -254,7 +253,7 @@ async function parseTwitchEmotes(text, platform) {
   if (platform !== 'twitch') return escapeHtml(text);
   
   // Simple emote detection: look for common Twitch emote patterns (capitalized words)
-  const words = text.split(/(\s+)/); // Split while preserving whitespace
+  const words = text.split(/(\s+)/);  // Split while preserving whitespace
   const result = [];
   
   for (const word of words) {
@@ -297,7 +296,8 @@ function renderMessageToTimeline(msg) {
           <div class="chat-text">${messageHtml}</div>
         </div>
       `;
-      chatTimeline.insertBefore(item, chatTimeline.firstChild);
+      chatTimeline.appendChild(item);
+      chatTimeline.scrollTop = chatTimeline.scrollHeight;
     });
     return;
   }
@@ -315,7 +315,7 @@ function renderMessageToTimeline(msg) {
   `;
 
   chatTimeline.appendChild(item);
-  chatTimeline.scrollTop = chatTimeline.scrollHeight; // Auto-scrolls timeline down natively
+  chatTimeline.scrollTop = chatTimeline.scrollHeight;
 }
 
 // Utility to prevent XSS attacks

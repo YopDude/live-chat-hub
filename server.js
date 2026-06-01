@@ -101,6 +101,25 @@ io.on('connection', (socket) => {
   });
 });
 
+// HTTP route for fetching Twitch emotes (CORS proxy)
+app.get('/api/twitch-emote/:emoteName', async (req, res) => {
+  const emoteName = req.params.emoteName;
+  try {
+    const axios = require('axios');
+    const response = await axios.get(`https://twitchemotes.com/api/v2/default?name=${encodeURIComponent(emoteName)}`);
+    if (response.data && response.data.emotes && response.data.emotes.length > 0) {
+      const emoteId = response.data.emotes[0].id;
+      const emoteUrl = `https://cdn.betterttv.net/emote/${emoteId}/1x`;
+      res.json({ success: true, url: emoteUrl });
+    } else {
+      res.json({ success: false });
+    }
+  } catch (err) {
+    console.error(`Error fetching emote ${emoteName}:`, err.message);
+    res.json({ success: false });
+  }
+});
+
 const PORT = 3000;
 server.listen(PORT, () => {
   console.log(`Live chat hub server listening on port ${PORT}`);
