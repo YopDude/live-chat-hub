@@ -10,7 +10,12 @@ const InstagramProvider = require('./providers/instagram');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+  cors: {
+    origin: ['https://yopdude.github.io', 'https://live-chat-hub.onrender.com', '*'],
+    methods: ['GET', 'POST'],
+  },
+});
 
 const providerClasses = {
   twitch: TwitchProvider,
