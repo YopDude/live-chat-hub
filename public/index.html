@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Stream Chat Hub</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <header>
+        <h1>Unified Chat Timeline</h1>
+        <button id="manager-toggle-btn" class="control-btn">⚙️ Manage Sources</button>
+    </header>
+
+    <div id="source-manager-panel" class="dropdown-panel hidden">
+        <div class="add-source-form">
+            <select id="platform-select">
+                <option value="twitch">Twitch</option>
+                <option value="youtube">YouTube</option>
+                <option value="tiktok">TikTok</option>
+                <option value="facebook">Facebook</option>
+                <option value="instagram">Instagram</option>
+            </select>
+            <input type="text" id="target-input" placeholder="Channel Name or Stream URL...">
+            <button id="add-btn" class="action-btn">Add</button>
+        </div>
+        <div id="active-sources-list" class="sources-grid"></div>
+    </div>
+
+    <main id="chat-timeline"></main>
+
+    <script src="app.js"></script>
+</body>
+</html>
