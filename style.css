@@ -140,16 +140,91 @@ header h1 {
   font-weight: 700;
 }
 
-/* Add Source Form */
-.add-source-form {
-  display: flex;
-  gap: 0.75rem;
-  padding: 1.5rem;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.1);
-  flex-wrap: wrap;
+/* Platform Selector */
+.platform-selector-wrapper {
+  position: relative;
+  flex: 0 0 auto;
 }
 
-#platform-select,
+.platform-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: rgba(226, 232, 240, 0.05);
+  border: 1px solid rgba(226, 232, 240, 0.15);
+  border-radius: 8px;
+  color: #e2e8f0;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 150px;
+}
+
+.platform-toggle:hover {
+  background: rgba(226, 232, 240, 0.08);
+}
+
+.platform-toggle:focus {
+  outline: none;
+  background: rgba(226, 232, 240, 0.08);
+  border-color: rgba(139, 92, 246, 0.5);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+}
+
+.platform-icon-small {
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+}
+
+.platform-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 30;
+  width: 100%;
+  min-width: 150px;
+  margin-top: 0.5rem;
+  background: rgba(18, 18, 20, 0.98);
+  border: 1px solid rgba(226, 232, 240, 0.2);
+  border-radius: 12px;
+  overflow: hidden;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+}
+
+.platform-dropdown.hidden {
+  display: none;
+}
+
+.platform-option {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: transparent;
+  border: none;
+  color: #e2e8f0;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  text-align: left;
+}
+
+.platform-option:hover {
+  background: rgba(226, 232, 240, 0.08);
+}
+
+.platform-option:active {
+  background: rgba(226, 232, 240, 0.12);
+}
+
+/* Add Source Form */
 #target-input {
   flex: 1;
   min-width: 150px;
@@ -163,14 +238,6 @@ header h1 {
   appearance: none;
 }
 
-#platform-select {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23e2e8f0' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 0.75rem center;
-  padding-right: 2.5rem;
-}
-
-#platform-select:focus,
 #target-input:focus {
   outline: none;
   background: rgba(226, 232, 240, 0.08);

@@ -21,13 +21,34 @@
             <button id="close-panel-btn" class="control-btn">✕</button>
         </div>
         <div class="add-source-form">
-            <select id="platform-select">
-                <option value="twitch">Twitch</option>
-                <option value="youtube">YouTube</option>
-                <option value="tiktok">TikTok</option>
-                <option value="facebook">Facebook</option>
-                <option value="instagram">Instagram</option>
-            </select>
+            <div class="platform-selector-wrapper">
+                <button id="platform-toggle-btn" class="platform-toggle">
+                    <img id="platform-icon-preview" src="assets/twch_icon.png" alt="" class="platform-icon-small">
+                    <span id="platform-label-preview">Twitch</span>
+                </button>
+                <div id="platform-dropdown" class="platform-dropdown hidden">
+                    <button class="platform-option" data-platform="twitch">
+                        <img src="assets/twch_icon.png" alt="" class="platform-icon-small">
+                        <span>Twitch</span>
+                    </button>
+                    <button class="platform-option" data-platform="youtube">
+                        <img src="assets/tube_icon.png" alt="" class="platform-icon-small">
+                        <span>YouTube</span>
+                    </button>
+                    <button class="platform-option" data-platform="tiktok">
+                        <img src="assets/tktk_icon.png" alt="" class="platform-icon-small">
+                        <span>TikTok</span>
+                    </button>
+                    <button class="platform-option" data-platform="facebook">
+                        <img src="assets/fb_icon.png" alt="" class="platform-icon-small">
+                        <span>Facebook</span>
+                    </button>
+                    <button class="platform-option" data-platform="instagram">
+                        <img src="assets/ins_icon.png" alt="" class="platform-icon-small">
+                        <span>Instagram</span>
+                    </button>
+                </div>
+            </div>
             <input type="text" id="target-input" placeholder="Channel Name or Stream URL...">
             <button id="add-btn" class="action-btn">Add</button>
         </div>

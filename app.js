@@ -13,9 +13,39 @@ function showStatus(message, type = 'info') {
   }, 5000);
 }
 
+function playNotificationSound() {
+  try {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+
+    oscillator.frequency.value = 800;
+    oscillator.type = 'sine';
+
+    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + 0.1);
+  } catch (err) {
+    console.log('Audio context not available:', err);
+  }
+}
+
 // Initialize App Configuration
 function init() {
   renderSourceCards();
+  
+  // Show source manager by default if no sources exist
+  if (streamSources.length === 0) {
+    sourcePanel.classList.remove('hidden');
+    sourcePanel.classList.add('visible');
+    managerToggleBtn.textContent = '✕ Close Sources';
+  }
+  
   // Connect existing storage instances back to your socket cluster on load
   streamSources.forEach((src) => {
     if (!src.isPaused) socket.emit('add-source', src);
@@ -27,6 +57,11 @@ socket.on('chat-message', (data) => {
   console.log('[FRONTEND INBOUND] Received chat message payload:', data);
   const currentConfig = streamSources.find((s) => s.id === data.sourceId);
   if (!currentConfig || currentConfig.isPaused) return;
+
+  // Play notification sound if not muted
+  if (!currentConfig.isMuted) {
+    playNotificationSound();
+  }
 
   // Trigger Text-To-Speech for unmuted system events
   if (data.isSystemAlert && !currentConfig.isMuted) {
@@ -60,7 +95,7 @@ if (closePanelBtn) {
 }
 
 document.getElementById('add-btn').addEventListener('click', () => {
-  const platform = document.getElementById('platform-select').value;
+  const platform = window.selectedPlatform || 'twitch';
   const target = document.getElementById('target-input').value.trim();
   if (!target) {
     alert('Please enter a target channel or URL');
@@ -93,6 +128,51 @@ document.getElementById('add-btn').addEventListener('click', () => {
     document.getElementById('target-input').value = '';
     showStatus(`Added ${platform} source: ${storedSource.target}`, 'info');
   });
+});
+
+// Platform selector dropdown
+window.selectedPlatform = 'twitch';
+const platformToggleBtn = document.getElementById('platform-toggle-btn');
+const platformDropdown = document.getElementById('platform-dropdown');
+const platformOptions = document.querySelectorAll('.platform-option');
+const platformLabelPreview = document.getElementById('platform-label-preview');
+const platformIconPreview = document.getElementById('platform-icon-preview');
+
+const platformIcons = {
+  twitch: 'assets/twch_icon.png',
+  youtube: 'assets/tube_icon.png',
+  tiktok: 'assets/tktk_icon.png',
+  facebook: 'assets/fb_icon.png',
+  instagram: 'assets/ins_icon.png',
+};
+
+const platformLabels = {
+  twitch: 'Twitch',
+  youtube: 'YouTube',
+  tiktok: 'TikTok',
+  facebook: 'Facebook',
+  instagram: 'Instagram',
+};
+
+platformToggleBtn.addEventListener('click', () => {
+  platformDropdown.classList.toggle('hidden');
+});
+
+platformOptions.forEach((option) => {
+  option.addEventListener('click', () => {
+    const platform = option.dataset.platform;
+    window.selectedPlatform = platform;
+    platformLabelPreview.textContent = platformLabels[platform];
+    platformIconPreview.src = platformIcons[platform];
+    platformDropdown.classList.add('hidden');
+  });
+});
+
+// Close dropdown when clicking outside
+document.addEventListener('click', (e) => {
+  if (!platformToggleBtn.contains(e.target) && !platformDropdown.contains(e.target)) {
+    platformDropdown.classList.add('hidden');
+  }
 });
 
 function renderSourceCards() {
