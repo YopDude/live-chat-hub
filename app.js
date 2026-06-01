@@ -224,57 +224,44 @@ function renderSourceCards() {
   });
 }
 
-// Cache for Twitch emotes to avoid repeated API calls
-const twitchEmoteCache = {};
-const emoteRegex = /\b([a-zA-Z0-9_]+)\b/g;
-
-// Fetch Twitch emote URLs via BTTV API
-async function getTwitchEmoteUrl(emoteName) {
-  if (twitchEmoteCache[emoteName]) {
-    return twitchEmoteCache[emoteName];
+// Parse Twitch emotes from raw emotes object
+function parseTwitchEmotes(message, emotesObj) {
+  if (!emotesObj || typeof emotesObj !== 'object' || Object.keys(emotesObj).length === 0) {
+    return escapeHtml(message);
   }
-  try {
-    // Try BTTV API for global emotes
-    const response = await fetch(`https://api.betterttv.net/emote/search?query=${encodeURIComponent(emoteName)}&limit=1`);
-    if (response.ok) {
-      const data = await response.json();
-      if (data && data.emotes && data.emotes.length > 0) {
-        const emoteUrl = `https://cdn.betterttv.net/emote/${data.emotes[0].id}/1x`;
-        twitchEmoteCache[emoteName] = emoteUrl;
-        return emoteUrl;
+
+  // Collect all position ranges with their emote IDs
+  const replacements = [];
+  for (const [emoteId, positions] of Object.entries(emotesObj)) {
+    if (Array.isArray(positions)) {
+      for (const posRange of positions) {
+        const [start, end] = posRange.split('-').map(Number);
+        replacements.push({
+          start,
+          end: end + 1, // Convert to exclusive end index
+          emoteId,
+          text: message.substring(start, end + 1),
+        });
       }
     }
-  } catch (err) {
-    console.log(`Could not fetch emote ${emoteName}:`, err);
   }
-  return null;
-}
 
-// Convert Twitch emote codes in messages to HTML images
-async function parseTwitchEmotes(text, platform) {
-  if (platform !== 'twitch') return escapeHtml(text);
-  
-  // Simple emote detection: look for common Twitch emote patterns (capitalized words)
-  const words = text.split(/(\s+)/);  // Split while preserving whitespace
-  const result = [];
-  
-  for (const word of words) {
-    if (/\s/.test(word)) {
-      result.push(escapeHtml(word));
-    } else if (/^[A-Z][a-zA-Z0-9_]{2,}$/.test(word)) {
-      // Check if this looks like a potential Twitch emote
-      const emoteUrl = await getTwitchEmoteUrl(word);
-      if (emoteUrl) {
-        result.push(`<img src="${emoteUrl}" alt="${escapeHtml(word)}" class="twitch-emote" title="${escapeHtml(word)}">`);
-      } else {
-        result.push(escapeHtml(word));
-      }
-    } else {
-      result.push(escapeHtml(word));
-    }
+  // Sort in descending order by start position (replace from end to avoid index shifting)
+  replacements.sort((a, b) => b.start - a.start);
+
+  // Build the HTML string by replacing emote ranges
+  let result = escapeHtml(message);
+  for (const replacement of replacements) {
+    const emoteUrl = `https://static-cdn.jtvnw.net/emoticons/v2/${replacement.emoteId}/default/dark/1.0`;
+    const emoteHtml = `<img src="${emoteUrl}" alt="${escapeHtml(replacement.text)}" class="twitch-emote" title="${escapeHtml(replacement.text)}" loading="lazy">`;
+    // Need to re-escape and slice carefully since we're working with escaped HTML
+    const beforeEscape = message.substring(0, replacement.start);
+    const afterEscape = message.substring(replacement.end);
+    result = escapeHtml(beforeEscape) + emoteHtml + escapeHtml(afterEscape);
+    message = beforeEscape + replacement.text + afterEscape; // Update for next iteration
   }
-  
-  return result.join('');
+
+  return result;
 }
 
 function renderMessageToTimeline(msg) {
@@ -284,9 +271,9 @@ function renderMessageToTimeline(msg) {
   const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const iconSrc = msg.iconUrl || platformIcons[msg.platform.toLowerCase()] || 'assets/twch_icon.png';
 
-  // Handle Twitch messages with emote async parsing
+  // Handle Twitch messages with native emote parsing
   if (msg.platform === 'twitch') {
-    // Add to DOM immediately to preserve message order
+    const messageHtml = parseTwitchEmotes(msg.message, msg.emotes);
     item.innerHTML = `
       <img src="${iconSrc}" class="platform-icon" alt="${msg.platform}">
       <div class="chat-content">
@@ -295,19 +282,10 @@ function renderMessageToTimeline(msg) {
           <span class="chat-platform">${escapeHtml(msg.platform)}</span>
           <span class="chat-timestamp">${time}</span>
         </div>
-        <div class="chat-text">${escapeHtml(msg.message)}</div>
+        <div class="chat-text">${messageHtml}</div>
       </div>
     `;
     chatTimeline.appendChild(item);
-    
-    // Parse and update emotes asynchronously
-    parseTwitchEmotes(msg.message, msg.platform).then((messageHtml) => {
-      const chatText = item.querySelector('.chat-text');
-      if (chatText) {
-        chatText.innerHTML = messageHtml;
-      }
-    });
-    
     chatTimeline.scrollTop = chatTimeline.scrollHeight;
     return;
   }

@@ -61,6 +61,7 @@ class TwitchProvider extends BaseProvider {
         timestamp: new Date().toISOString(),
         isSystemAlert: false,
         iconUrl: TWITCH_ICON_URL,
+        emotes: userstate.emotes || null,
       });
     });
 
