@@ -16,8 +16,21 @@ class YouTubeProvider extends BaseProvider {
     if (typeof target !== 'string') return null;
     const raw = target.trim();
     if (!raw) return null;
-    const id = YouTubeProvider.extractVideoIdStatic(raw);
-    return id;
+    
+    // Try to extract a video ID first
+    const videoId = YouTubeProvider.extractVideoIdStatic(raw);
+    if (videoId && !videoId.startsWith('@')) {
+      return videoId;
+    }
+    
+    // Try to extract channel handle from URLs or raw channel names
+    const channelHandle = YouTubeProvider.extractChannelHandle(raw);
+    if (channelHandle) {
+      // Return as channel handle marker so we can fetch live stream later
+      return `@${channelHandle}`;
+    }
+    
+    return null;
   }
 
   static validateTarget(target) {
@@ -47,7 +60,54 @@ class YouTubeProvider extends BaseProvider {
     return null;
   }
 
+  static extractChannelHandle(target) {
+    try {
+      const url = new URL(target);
+      const pathname = url.pathname;
+      // Match @ChannelHandle
+      const handleMatch = pathname.match(/\/@([a-zA-Z0-9_-]+)/);
+      if (handleMatch) {
+        return handleMatch[1];
+      }
+    } catch (err) {
+      // Handle raw channel names like "ThaRixer" or "@ThaRixer"
+      const match = target.match(/^@?([a-zA-Z0-9_-]+)$/);
+      if (match) {
+        return match[1];
+      }
+    }
+    return null;
+  }
+
+  async fetchChannelLiveStream(channelHandle) {
+    try {
+      console.log(`[YouTubeProvider] Fetching live stream for channel: ${channelHandle}`);
+      const channelUrl = `https://www.youtube.com/@${channelHandle}/live`;
+      const response = await axios.get(channelUrl, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36',
+        },
+      });
+
+      // Extract video ID from the response
+      const idMatch = response.data.match(/(?:"videoId"|"VIDEO_ID"\s*:\s*)"([a-zA-Z0-9_-]{11})/);
+      if (idMatch && idMatch[1]) {
+        console.log(`[YouTubeProvider] Found live stream video ID: ${idMatch[1]}`);
+        return idMatch[1];
+      }
+      
+      console.warn(`[YouTubeProvider] No live stream found for channel: ${channelHandle}`);
+      return null;
+    } catch (err) {
+      console.error(`[YouTubeProvider] Error fetching channel stream:`, err.message);
+      return null;
+    }
+  }
+
+
   extractVideoId(target) {
+    // First try to extract a video ID
     try {
       const url = new URL(target);
       if (url.searchParams.has('v')) {
@@ -64,6 +124,22 @@ class YouTubeProvider extends BaseProvider {
         return match[1];
       }
     }
+
+    // Try to extract channel handle
+    try {
+      const url = new URL(target);
+      const pathname = url.pathname;
+      const handleMatch = pathname.match(/\/@([a-zA-Z0-9_-]+)/);
+      if (handleMatch) {
+        return `@${handleMatch[1]}`;
+      }
+    } catch (err) {
+      const match = target.match(/^@?([a-zA-Z0-9_-]+)$/);
+      if (match) {
+        return `@${match[1]}`;
+      }
+    }
+
     return null;
   }
 
@@ -227,8 +303,30 @@ class YouTubeProvider extends BaseProvider {
       return;
     }
 
+    // If target starts with @, it's a channel handle—fetch the live stream video ID
+    if (this.target.startsWith('@')) {
+      const channelHandle = this.target.substring(1);
+      this.fetchChannelLiveStream(channelHandle)
+        .then((videoId) => {
+          if (videoId) {
+            this.videoId = videoId;
+            this.startPolling();
+          } else {
+            console.error(`[YouTubeProvider] No active live stream for channel @${channelHandle}`);
+          }
+        })
+        .catch((err) => {
+          console.error(`[YouTubeProvider] Error resolving channel live stream:`, err);
+        });
+      return;
+    }
+
+    this.startPolling();
+  }
+
+  startPolling() {
     if (!this.videoId) {
-      throw new Error('YouTubeProvider requires a valid YouTube video URL or ID');
+      throw new Error('YouTubeProvider requires a valid YouTube video URL, ID, or channel name');
     }
 
     this.pollInterval = setInterval(() => this.pollLiveChat(), POLL_INTERVAL_MS);
