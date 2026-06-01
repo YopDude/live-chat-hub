@@ -63,11 +63,8 @@ socket.on('chat-message', (data) => {
     playNotificationSound();
   }
 
-  // Trigger Text-To-Speech for unmuted system events
-  if (data.isSystemAlert && !currentConfig.isMuted) {
-    const announcement = new SpeechSynthesisUtterance(`${data.username}: ${data.message}`);
-    window.speechSynthesis.speak(announcement);
-  }
+  // System alerts remain visually highlighted in chat.
+  // Text-to-speech has been removed.
 
   renderMessageToTimeline(data);
 });
