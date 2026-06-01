@@ -26,7 +26,6 @@ class YouTubeProvider extends BaseProvider {
     // Try to extract channel handle from URLs or raw channel names
     const channelHandle = YouTubeProvider.extractChannelHandle(raw);
     if (channelHandle) {
-      // Return as channel handle marker so we can fetch live stream later
       return `@${channelHandle}`;
     }
     
@@ -64,13 +63,11 @@ class YouTubeProvider extends BaseProvider {
     try {
       const url = new URL(target);
       const pathname = url.pathname;
-      // Match @ChannelHandle
       const handleMatch = pathname.match(/\/@([^\/?#]+)/u);
       if (handleMatch) {
         return handleMatch[1];
       }
     } catch (err) {
-      // Handle raw channel names like "ThaRixer" or "@ThaRixer"
       const match = target.match(/^@?([^\/\s]+)$/u);
       if (match) {
         return match[1];
@@ -81,7 +78,7 @@ class YouTubeProvider extends BaseProvider {
 
   async fetchChannelLiveStream(channelHandle) {
     try {
-      console.log(`[YouTubeProvider] Fetching live stream for channel: ${channelHandle}`);
+      console.log(`[YouTubeProvider] Dynamic lookup tracking active for channel: @${channelHandle}`);
       const channelUrl = `https://www.youtube.com/@${channelHandle}/live`;
       const response = await axios.get(channelUrl, {
         headers: {
@@ -90,31 +87,29 @@ class YouTubeProvider extends BaseProvider {
         },
       });
 
-      // Extract video ID from the response
-      const idMatch = response.data.match(/(?:"videoId"|"VIDEO_ID")\s*:\s*"([a-zA-Z0-9_-]{11})"/);
-      if (idMatch && idMatch[1]) {
-        console.log(`[YouTubeProvider] Found live stream video ID: ${idMatch[1]}`);
-        return idMatch[1];
+      // Crucial Safety: Confirm that the text "isLive":true is present on the page.
+      // If they are offline, YouTube serves an old VOD page where "isLive" is false or missing.
+      if (!response.data.includes('"isLive":true') && !response.data.includes('"isLiveStream":true')) {
+        console.warn(`[YouTubeProvider] Channel @${channelHandle} is currently OFFLINE. Ignoring archive fallbacks.`);
+        return null;
       }
 
-      // Fallback: search for the generic object key with videoId
-      const fallbackMatch = response.data.match(/"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/);
-      if (fallbackMatch && fallbackMatch[1]) {
-        console.log(`[YouTubeProvider] Found live stream video ID via fallback: ${fallbackMatch[1]}`);
-        return fallbackMatch[1];
+      // Extract video ID from the live response page layout
+      const idMatch = response.data.match(/(?:"videoId"|"VIDEO_ID")\s*:\s*"([a-zA-Z0-9_-]{11})"/);
+      if (idMatch && idMatch[1]) {
+        console.log(`[YouTubeProvider] Successfully linked to active live stream ID: ${idMatch[1]}`);
+        return idMatch[1];
       }
       
-      console.warn(`[YouTubeProvider] No live stream found for channel: ${channelHandle}`);
+      console.warn(`[YouTubeProvider] Could not find live stream identifier strings for channel: ${channelHandle}`);
       return null;
     } catch (err) {
-      console.error(`[YouTubeProvider] Error fetching channel stream:`, err.message);
+      console.error(`[YouTubeProvider] Error resolving dynamic channel stream:`, err.message);
       return null;
     }
   }
 
-
   extractVideoId(target) {
-    // First try to extract a video ID
     try {
       const url = new URL(target);
       if (url.searchParams.has('v')) {
@@ -132,7 +127,6 @@ class YouTubeProvider extends BaseProvider {
       }
     }
 
-    // Try to extract channel handle
     try {
       const url = new URL(target);
       const pathname = url.pathname;
@@ -177,7 +171,8 @@ class YouTubeProvider extends BaseProvider {
     }
 
     if (Array.isArray(node)) {
-      if (node.some((item) => item && (item.addChatItemAction || item.replayChatItemAction))) {
+      // FIX: Removed replayChatItemAction entirely to ensure old historical data cannot load
+      if (node.some((item) => item && item.addChatItemAction)) {
         return node;
       }
       for (const item of node) {
@@ -199,28 +194,18 @@ class YouTubeProvider extends BaseProvider {
   }
 
   normalizeText(runs) {
-    if (!runs) {
-      return '';
-    }
-    if (typeof runs === 'string') {
-      return runs;
-    }
+    if (!runs) return '';
+    if (typeof runs === 'string') return runs;
     if (Array.isArray(runs)) {
       return runs.map((run) => run?.text || '').join('');
     }
-    if (runs.simpleText) {
-      return runs.simpleText;
-    }
+    if (runs.simpleText) return runs.simpleText;
     return '';
   }
 
   normalizeAuthor(author) {
-    if (!author) {
-      return 'YouTube Viewer';
-    }
-    if (author.simpleText) {
-      return author.simpleText;
-    }
+    if (!author) return 'YouTube Viewer';
+    if (author.simpleText) return author.simpleText;
     if (Array.isArray(author.runs)) {
       return author.runs.map((run) => run.text || '').join('');
     }
@@ -228,11 +213,10 @@ class YouTubeProvider extends BaseProvider {
   }
 
   extractActionPayload(action) {
-    const chatItem = action.addChatItemAction || action.replayChatItemAction;
+    // FIX: Only extract real-time live events (addChatItemAction)
+    const chatItem = action.addChatItemAction;
     const item = chatItem?.item;
-    if (!item) {
-      return null;
-    }
+    if (!item) return null;
 
     const textRenderer =
       item.liveChatTextMessageRenderer ||
@@ -241,9 +225,7 @@ class YouTubeProvider extends BaseProvider {
       item.liveChatMembershipItemRenderer ||
       item.liveChatStandardMessageRenderer;
 
-    if (!textRenderer) {
-      return null;
-    }
+    if (!textRenderer) return null;
 
     const messageText =
       this.normalizeText(textRenderer.message?.runs || textRenderer.message?.simpleText) ||
@@ -259,9 +241,7 @@ class YouTubeProvider extends BaseProvider {
       item.liveChatMembershipItemRenderer,
     );
 
-    if (!messageText || !username) {
-      return null;
-    }
+    if (!messageText || !username) return null;
 
     return {
       id,
@@ -275,8 +255,9 @@ class YouTubeProvider extends BaseProvider {
   }
 
   async pollLiveChat() {
-    if (!this.videoId) {
-      throw new Error('Invalid YouTube target URL or missing video ID');
+    if (!this.videoId || this.videoId.startsWith('@')) {
+      // Safe exit point if stream resolution is pending or channel is offline
+      return;
     }
 
     try {
@@ -285,15 +266,7 @@ class YouTubeProvider extends BaseProvider {
 
       for (const action of actions) {
         const payload = this.extractActionPayload(action);
-        if (!payload) {
-          continue;
-        }
-
-        if (!payload.id) {
-          continue;
-        }
-
-        if (this.seenIds.has(payload.id)) {
+        if (!payload || !payload.id || this.seenIds.has(payload.id)) {
           continue;
         }
 
@@ -306,20 +279,18 @@ class YouTubeProvider extends BaseProvider {
   }
 
   start() {
-    if (this.isActive) {
-      return;
-    }
+    if (this.isActive) return;
 
-    // If target starts with @, it's a channel handle—fetch the live stream video ID
-    if (this.target.startsWith('@')) {
-      const channelHandle = this.target.substring(1);
+    // FIX: Evaluate this.videoId instead of raw target URL to catch channel patterns
+    if (this.videoId && this.videoId.startsWith('@')) {
+      const channelHandle = this.videoId.substring(1);
       this.fetchChannelLiveStream(channelHandle)
-        .then((videoId) => {
-          if (videoId) {
-            this.videoId = videoId;
+        .then((resolvedVideoId) => {
+          if (resolvedVideoId) {
+            this.videoId = resolvedVideoId;
             this.startPolling();
           } else {
-            console.error(`[YouTubeProvider] No active live stream for channel @${channelHandle}`);
+            console.error(`[YouTubeProvider] Initialization aborted: Channel @${channelHandle} is not streaming.`);
           }
         })
         .catch((err) => {
@@ -332,8 +303,8 @@ class YouTubeProvider extends BaseProvider {
   }
 
   startPolling() {
-    if (!this.videoId) {
-      throw new Error('YouTubeProvider requires a valid YouTube video URL, ID, or channel name');
+    if (!this.videoId || this.videoId.startsWith('@')) {
+      throw new Error('YouTubeProvider requires a resolved, valid 11-character video ID before polling.');
     }
 
     this.pollInterval = setInterval(() => this.pollLiveChat(), POLL_INTERVAL_MS);
