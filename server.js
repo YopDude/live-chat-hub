@@ -42,6 +42,7 @@ io.on('connection', (socket) => {
   };
 
   socket.on('add-source', ({ id, platform, target }) => {
+    console.log(`[add-source] Received: platform='${platform}', target='${target}'`);
     if (!id || !platform || !target) {
       socket.emit('error', { message: 'add-source requires id, platform, and target.' });
       return;

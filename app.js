@@ -13,6 +13,7 @@ function init() {
 
 // Global Message Pipeline Catchment
 socket.on('chat-message', (data) => {
+  console.log('[FRONTEND INBOUND] Received chat message payload:', data);
   const currentConfig = streamSources.find((s) => s.id === data.sourceId);
   if (!currentConfig || currentConfig.isPaused) return;
 

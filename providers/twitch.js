@@ -5,6 +5,7 @@ const TWITCH_ICON_URL = 'https://static.twitchcdn.net/assets/glitch_474x356.png'
 
 class TwitchProvider extends BaseProvider {
   constructor(target, onMessage) {
+    console.log(`[TwitchProvider] Constructing with target: ${target}`);
     super(target, onMessage);
     this.client = null;
   }
