@@ -224,14 +224,6 @@ function renderSourceCards() {
   });
 }
 
-const platformIcons = {
-  twitch: 'assets/twch_icon.png',
-  youtube: 'assets/tube_icon.png',
-  tiktok: 'assets/tktk_icon.png',
-  facebook: 'assets/fb_icon.png',
-  instagram: 'assets/ins_icon.png',
-};
-
 // Cache for Twitch emotes to avoid repeated API calls
 const twitchEmoteCache = {};
 const emoteRegex = /\b([a-zA-Z0-9_]+)\b/g;
