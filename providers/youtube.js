@@ -65,13 +65,13 @@ class YouTubeProvider extends BaseProvider {
       const url = new URL(target);
       const pathname = url.pathname;
       // Match @ChannelHandle
-      const handleMatch = pathname.match(/\/@([a-zA-Z0-9_-]+)/);
+      const handleMatch = pathname.match(/\/@([^\/?#]+)/u);
       if (handleMatch) {
         return handleMatch[1];
       }
     } catch (err) {
       // Handle raw channel names like "ThaRixer" or "@ThaRixer"
-      const match = target.match(/^@?([a-zA-Z0-9_-]+)$/);
+      const match = target.match(/^@?([^\/\s]+)$/u);
       if (match) {
         return match[1];
       }
@@ -136,12 +136,12 @@ class YouTubeProvider extends BaseProvider {
     try {
       const url = new URL(target);
       const pathname = url.pathname;
-      const handleMatch = pathname.match(/\/@([a-zA-Z0-9_-]+)/);
+      const handleMatch = pathname.match(/\/@([^\/?#]+)/u);
       if (handleMatch) {
         return `@${handleMatch[1]}`;
       }
     } catch (err) {
-      const match = target.match(/^@?([a-zA-Z0-9_-]+)$/);
+      const match = target.match(/^@?([^\/\s]+)$/u);
       if (match) {
         return `@${match[1]}`;
       }
