@@ -83,26 +83,33 @@ class YouTubeProvider extends BaseProvider {
       const response = await axios.get(channelUrl, {
         headers: {
           'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept-Language': 'en-US,en;q=0.9',
         },
       });
 
-      // Crucial Safety: Confirm that the text "isLive":true is present on the page.
-      // If they are offline, YouTube serves an old VOD page where "isLive" is false or missing.
-      if (!response.data.includes('"isLive":true') && !response.data.includes('"isLiveStream":true')) {
-        console.warn(`[YouTubeProvider] Channel @${channelHandle} is currently OFFLINE. Ignoring archive fallbacks.`);
+      // FIX: Extract the video ID strictly from head canonical or OpenGraph properties.
+      // This prevents matching random live recommendations in the sidebar layout.
+      const canonicalMatch = response.data.match(/<link rel="canonical" href="[^"]*watch\?v=([a-zA-Z0-9_-]{11})"/);
+      const ogMatch = response.data.match(/<meta property="og:url" content="[^"]*watch\?v=([a-zA-Z0-9_-]{11})"/);
+      
+      const videoId = (canonicalMatch && canonicalMatch[1]) || (ogMatch && ogMatch[1]);
+
+      if (!videoId) {
         return null;
       }
 
-      // Extract video ID from the live response page layout
-      const idMatch = response.data.match(/(?:"videoId"|"VIDEO_ID")\s*:\s*"([a-zA-Z0-9_-]{11})"/);
-      if (idMatch && idMatch[1]) {
-        console.log(`[YouTubeProvider] Successfully linked to active live stream ID: ${idMatch[1]}`);
-        return idMatch[1];
+      // Verify that this specific main player item is actually live, rather than a channel trailer VOD
+      const isLiveActive = response.data.includes('"isLive":true') || 
+                           response.data.includes('"isLiveStream":true') || 
+                           response.data.includes('"style":"LIVE"');
+
+      if (!isLiveActive) {
+        return null;
       }
-      
-      console.warn(`[YouTubeProvider] Could not find live stream identifier strings for channel: ${channelHandle}`);
-      return null;
+
+      console.log(`[YouTubeProvider] Successfully isolated verified active live stream ID: ${videoId}`);
+      return videoId;
     } catch (err) {
       console.error(`[YouTubeProvider] Error resolving dynamic channel stream:`, err.message);
       return null;
@@ -152,7 +159,7 @@ class YouTubeProvider extends BaseProvider {
     const response = await axios.get(this.buildChatUrl(), {
       headers: {
         'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36',
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       },
     });
 
@@ -171,7 +178,6 @@ class YouTubeProvider extends BaseProvider {
     }
 
     if (Array.isArray(node)) {
-      // FIX: Removed replayChatItemAction entirely to ensure old historical data cannot load
       if (node.some((item) => item && item.addChatItemAction)) {
         return node;
       }
@@ -213,7 +219,6 @@ class YouTubeProvider extends BaseProvider {
   }
 
   extractActionPayload(action) {
-    // FIX: Only extract real-time live events (addChatItemAction)
     const chatItem = action.addChatItemAction;
     const item = chatItem?.item;
     if (!item) return null;
@@ -256,7 +261,6 @@ class YouTubeProvider extends BaseProvider {
 
   async pollLiveChat() {
     if (!this.videoId || this.videoId.startsWith('@')) {
-      // Safe exit point if stream resolution is pending or channel is offline
       return;
     }
 
@@ -281,21 +285,28 @@ class YouTubeProvider extends BaseProvider {
   start() {
     if (this.isActive) return;
 
-    // FIX: Evaluate this.videoId instead of raw target URL to catch channel patterns
     if (this.videoId && this.videoId.startsWith('@')) {
       const channelHandle = this.videoId.substring(1);
-      this.fetchChannelLiveStream(channelHandle)
-        .then((resolvedVideoId) => {
-          if (resolvedVideoId) {
-            this.videoId = resolvedVideoId;
-            this.startPolling();
-          } else {
-            console.error(`[YouTubeProvider] Initialization aborted: Channel @${channelHandle} is not streaming.`);
-          }
-        })
-        .catch((err) => {
-          console.error(`[YouTubeProvider] Error resolving channel live stream:`, err);
-        });
+      
+      // FIX: Upgraded to a continuous background polling loop to provide a true 
+      // "set-it-and-forget-it" UX if the channel starts up while offline.
+      const resolveAndConnect = async () => {
+        const resolvedVideoId = await this.fetchChannelLiveStream(channelHandle);
+        if (resolvedVideoId) {
+          this.videoId = resolvedVideoId;
+          this.startPolling();
+        } else {
+          console.log(`[YouTubeProvider] @${channelHandle} is currently offline. Re-checking stream state in 30 seconds...`);
+          this.pollInterval = setTimeout(resolveAndConnect, 30000);
+        }
+      };
+
+      resolveAndConnect().catch((err) => {
+        console.error(`[YouTubeProvider] Handle tracking thread encountered a fault:`, err);
+      });
+      
+      this.isActive = true;
+      super.start();
       return;
     }
 
@@ -307,16 +318,24 @@ class YouTubeProvider extends BaseProvider {
       throw new Error('YouTubeProvider requires a resolved, valid 11-character video ID before polling.');
     }
 
+    // Clear previous check-timers if switching gears to active polling
+    if (this.pollInterval) {
+      clearTimeout(this.pollInterval);
+    }
+
     this.pollInterval = setInterval(() => this.pollLiveChat(), POLL_INTERVAL_MS);
     this.pollLiveChat().catch((err) => {
       console.error('YouTubeProvider initial poll failed:', err.message || err);
     });
 
-    super.start();
+    if (!this.isActive) {
+      super.start();
+    }
   }
 
   stop() {
     if (this.pollInterval) {
+      clearTimeout(this.pollInterval);
       clearInterval(this.pollInterval);
       this.pollInterval = null;
     }
