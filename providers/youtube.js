@@ -12,6 +12,41 @@ class YouTubeProvider extends BaseProvider {
     this.videoId = this.extractVideoId(target);
   }
 
+  static normalizeTarget(target) {
+    if (typeof target !== 'string') return null;
+    const raw = target.trim();
+    if (!raw) return null;
+    const id = YouTubeProvider.extractVideoIdStatic(raw);
+    return id;
+  }
+
+  static validateTarget(target) {
+    return Boolean(this.normalizeTarget(target));
+  }
+
+  static extractVideoIdStatic(target) {
+    try {
+      const url = new URL(target);
+      if (url.searchParams.has('v')) {
+        return url.searchParams.get('v');
+      }
+      const pathname = url.pathname;
+      const match = pathname.match(/\/([a-zA-Z0-9_-]{11})(?:$|\/)/);
+      if (match) {
+        return match[1];
+      }
+    } catch (err) {
+      const match = target.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+      if (match) {
+        return match[1];
+      }
+      if (/^[a-zA-Z0-9_-]{11}$/.test(target)) {
+        return target;
+      }
+    }
+    return null;
+  }
+
   extractVideoId(target) {
     try {
       const url = new URL(target);

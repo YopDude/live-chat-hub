@@ -9,6 +9,14 @@ class BaseProvider {
     this.isActive = false;
   }
 
+  static normalizeTarget(target) {
+    return typeof target === 'string' ? target.trim() : null;
+  }
+
+  static validateTarget(target) {
+    return Boolean(this.normalizeTarget(target));
+  }
+
   start() {
     this.isActive = true;
   }

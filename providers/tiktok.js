@@ -10,6 +10,27 @@ class TikTokProvider extends BaseProvider {
     this.messageCounter = 0;
   }
 
+  static normalizeTarget(target) {
+    if (typeof target !== 'string') return null;
+    const raw = target.trim();
+    if (!raw) return null;
+
+    try {
+      const url = new URL(raw);
+      if (!/^(www\.)?tiktok\.com$/i.test(url.hostname)) return null;
+      const path = url.pathname.replace(/^\/+|\/+$/g, '');
+      if (!path) return null;
+      const username = path.split('/')[0];
+      return username.replace(/^@/, '') || null;
+    } catch (err) {
+      return raw.replace(/^@/, '').trim() || null;
+    }
+  }
+
+  static validateTarget(target) {
+    return Boolean(this.normalizeTarget(target));
+  }
+
   start() {
     if (this.isActive) {
       return;

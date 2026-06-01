@@ -12,6 +12,25 @@ class FacebookProvider extends BaseProvider {
     this.seenIds = new Set();
   }
 
+  static normalizeTarget(target) {
+    if (typeof target !== 'string') return null;
+    const raw = target.trim();
+    if (!raw) return null;
+
+    try {
+      const url = new URL(raw);
+      const videoId = url.searchParams.get('v') || url.pathname.match(/\/videos\/(\d+)/)?.[1] || null;
+      return videoId || null;
+    } catch (err) {
+      const match = raw.match(/^(\d+)$/);
+      return match ? match[1] : null;
+    }
+  }
+
+  static validateTarget(target) {
+    return Boolean(this.normalizeTarget(target));
+  }
+
   async fetchPublicVideoComments() {
     try {
       // Extensible placeholder for public video comment fetching

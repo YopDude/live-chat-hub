@@ -1,6 +1,17 @@
 const socket = io('https://live-chat-hub.onrender.com'); // Changes automatically based on deployment URL
 let streamSources = JSON.parse(localStorage.getItem('chatSources')) || [];
 const chatTimeline = document.getElementById('chat-timeline');
+const statusBanner = document.getElementById('status-banner');
+
+function showStatus(message, type = 'info') {
+  statusBanner.textContent = message;
+  statusBanner.className = `status-banner ${type}`;
+  statusBanner.classList.remove('hidden');
+  window.clearTimeout(showStatus.timeoutId);
+  showStatus.timeoutId = window.setTimeout(() => {
+    statusBanner.classList.add('hidden');
+  }, 5000);
+}
 
 // Initialize App Configuration
 function init() {
@@ -63,12 +74,25 @@ document.getElementById('add-btn').addEventListener('click', () => {
     isPaused: false,
     isMuted: false,
   };
-  streamSources.push(newSource);
-  localStorage.setItem('chatSources', JSON.stringify(streamSources));
 
-  socket.emit('add-source', newSource);
-  renderSourceCards();
-  document.getElementById('target-input').value = '';
+  socket.emit('add-source', newSource, (response) => {
+    if (!response || !response.success) {
+      const message = response?.error || 'Unable to add source.';
+      showStatus(`Source error: ${message}`, 'error');
+      return;
+    }
+
+    const storedSource = {
+      ...newSource,
+      target: response.source.target,
+    };
+
+    streamSources.push(storedSource);
+    localStorage.setItem('chatSources', JSON.stringify(streamSources));
+    renderSourceCards();
+    document.getElementById('target-input').value = '';
+    showStatus(`Added ${platform} source: ${storedSource.target}`, 'info');
+  });
 });
 
 function renderSourceCards() {

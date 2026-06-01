@@ -10,6 +10,27 @@ class TwitchProvider extends BaseProvider {
     this.client = null;
   }
 
+  static normalizeTarget(target) {
+    if (typeof target !== 'string') return null;
+    const raw = target.trim();
+    if (!raw) return null;
+
+    try {
+      const url = new URL(raw);
+      if (!/^(www\.)?twitch\.tv$/i.test(url.hostname)) return null;
+      const path = url.pathname.replace(/^\/+|\/+$/g, '');
+      if (!path) return null;
+      const channel = path.split('/')[0];
+      return channel ? channel.replace(/^@/, '') : null;
+    } catch (err) {
+      return raw.replace(/^@/, '').trim() || null;
+    }
+  }
+
+  static validateTarget(target) {
+    return Boolean(this.normalizeTarget(target));
+  }
+
   start() {
     if (this.isActive) {
       console.log(`[TwitchProvider] Already active for ${this.target}, skipping restart`);

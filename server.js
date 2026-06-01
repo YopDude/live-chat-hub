@@ -41,32 +41,48 @@ io.on('connection', (socket) => {
     activeSources.delete(sourceId);
   };
 
-  socket.on('add-source', ({ id, platform, target }) => {
+  socket.on('add-source', ({ id, platform, target }, callback) => {
     console.log(`[add-source] Received: platform='${platform}', target='${target}'`);
     if (!id || !platform || !target) {
-      socket.emit('error', { message: 'add-source requires id, platform, and target.' });
+      const error = 'add-source requires id, platform, and target.';
+      socket.emit('error', { message: error });
+      if (typeof callback === 'function') callback({ success: false, error });
       return;
     }
 
     const ProviderClass = providerClasses[platform.toLowerCase()];
     if (!ProviderClass) {
-      socket.emit('error', { message: `Unsupported platform: ${platform}` });
+      const error = `Unsupported platform: ${platform}`;
+      socket.emit('error', { message: error });
+      if (typeof callback === 'function') callback({ success: false, error });
+      return;
+    }
+
+    const normalizedTarget = ProviderClass.normalizeTarget(target);
+    if (!normalizedTarget) {
+      const error = `Invalid ${platform} target: ${target}`;
+      socket.emit('error', { message: error });
+      if (typeof callback === 'function') callback({ success: false, error });
       return;
     }
 
     stopSource(id);
 
-    const provider = new ProviderClass(target, (message) => {
+    const provider = new ProviderClass(normalizedTarget, (message) => {
       socket.emit('chat-message', {
         sourceId: id,
         platform,
-        target,
+        target: normalizedTarget,
         ...message,
       });
     });
 
     activeSources.set(id, provider);
     provider.start();
+
+    if (typeof callback === 'function') {
+      callback({ success: true, source: { id, platform, target: normalizedTarget } });
+    }
   });
 
   socket.on('remove-source', ({ id }) => {

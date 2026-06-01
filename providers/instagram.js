@@ -12,6 +12,24 @@ class InstagramProvider extends BaseProvider {
     this.seenIds = new Set();
   }
 
+  static normalizeTarget(target) {
+    if (typeof target !== 'string') return null;
+    const raw = target.trim();
+    if (!raw) return null;
+
+    try {
+      const url = new URL(raw);
+      const match = url.pathname.match(/\/(?:p|reel)\/([a-zA-Z0-9_-]+)/);
+      return match ? match[1] : null;
+    } catch (err) {
+      return /^[a-zA-Z0-9_-]+$/.test(raw) ? raw : null;
+    }
+  }
+
+  static validateTarget(target) {
+    return Boolean(this.normalizeTarget(target));
+  }
+
   async fetchPublicPostComments() {
     try {
       // Extensible placeholder for public post comment fetching
