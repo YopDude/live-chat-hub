@@ -68,16 +68,22 @@ class YouTubeProvider extends BaseProvider {
   static extractChannelHandle(target) {
     try {
       if (target.startsWith('http://') || target.startsWith('https://')) {
-        const url = new URL(target);
+        // decodeURI handles situations where the app receives a raw percent-encoded string
+        const decodedTarget = decodeURI(target);
+        const url = new URL(decodedTarget);
         const pathname = url.pathname;
-        const handleMatch = pathname.match(/\/@([a-zA-Z0-9_-]+)/);
+        
+        // Match standard alphanumeric or multibyte/Unicode channel names using the /u flag
+        const handleMatch = pathname.match(/\/@([a-zA-Z0-9_\-\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\uFF00-\uFFEF]+)/u);
         if (handleMatch) {
           return handleMatch[1];
         }
       }
     } catch (err) {}
 
-    const match = target.match(/^@?([a-zA-Z0-9_-]+)$/);
+    // Match raw input handles like "てえんださん" or "@てえんださん"
+    const decodedRaw = decodeURIComponent(target);
+    const match = decodedRaw.match(/^@?([a-zA-Z0-9_\-\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\uFF00-\uFFEF]+)$/u);
     if (match) {
       return match[1];
     }
@@ -85,18 +91,20 @@ class YouTubeProvider extends BaseProvider {
   }
 
   /**
-   * Resolves the active live stream video ID using a combination of the direct 
-   * /live text search and a structural parsing of the hidden InnerTube JSON payload.
+   * Resolves the active live stream video ID using direct HTML parsing.
+   * Encodes Unicode channels safely to match YouTube network routing.
    */
   async fetchChannelLiveStream(channelHandle) {
     try {
-      console.log(`[YouTubeProvider] Resolving stream for channel: @${channelHandle}`);
+      // Safely transform Japanese text into percent-encoded strings for the network packet
+      const safeHandle = encodeURIComponent(channelHandle);
+      console.log(`[YouTubeProvider] Resolving stream for channel: @${channelHandle} (${safeHandle})`);
       
-      const liveUrl = `https://www.youtube.com/@${channelHandle}/live`;
+      const liveUrl = `https://www.youtube.com/@${safeHandle}/live`;
       const response = await axios.get(liveUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
           'Cache-Control': 'no-cache'
         }
       });
@@ -113,7 +121,6 @@ class YouTubeProvider extends BaseProvider {
       // Method 2: Fallback to scanning for deep structural video configurations in standard scripts
       const videoConfigMatch = html.match(/"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/);
       if (videoConfigMatch && videoConfigMatch[1]) {
-        // Confirm it's truly a live broadcast room
         if (html.includes('isLive') || html.includes('LIVE_STREAM_RENDERER') || html.includes('LIVE')) {
           console.log(`[YouTubeProvider] Found live stream ID via configuration matching: ${videoConfigMatch[1]}`);
           return videoConfigMatch[1];
@@ -137,16 +144,12 @@ class YouTubeProvider extends BaseProvider {
     return `https://www.youtube.com/live_chat?v=${this.videoId}`;
   }
 
-  /**
-   * Fetches chat engine payloads. If standard layout rendering drops due to host blocks,
-   * it falls back to an un-challengable standalone mobile interface parsing context.
-   */
   async fetchInitialData() {
     try {
       const response = await axios.get(this.buildChatUrl(), {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
-          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
         },
       });
 
@@ -161,7 +164,6 @@ class YouTubeProvider extends BaseProvider {
 
       return JSON.parse(match[1]);
     } catch (err) {
-      // Emergency dynamic payload recovery loop
       throw new Error(`YouTube chat data compilation failed: ${err.message}`);
     }
   }
