@@ -68,13 +68,14 @@ class YouTubeProvider extends BaseProvider {
   static extractChannelHandle(target) {
     try {
       if (target.startsWith('http://') || target.startsWith('https://')) {
-        // decodeURI handles situations where the app receives a raw percent-encoded string
-        const decodedTarget = decodeURI(target);
-        const url = new URL(decodedTarget);
-        const pathname = url.pathname;
+        // 1. Initialize URL framework with standard string to capture structure safely
+        const url = new URL(target);
         
-        // Match standard alphanumeric or multibyte/Unicode channel names using the /u flag
-        const handleMatch = pathname.match(/\/@([a-zA-Z0-9_\-\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\uFF00-\uFFEF]+)/u);
+        // 2. Decode the extracted pathname directly to bypass Node's internal auto-re-encoding behavior
+        const decodedPathname = decodeURIComponent(url.pathname);
+        
+        // 3. Match standard alphanumeric or multibyte/Unicode channel names using the /u flag
+        const handleMatch = decodedPathname.match(/\/@([a-zA-Z0-9_\-\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\uFF00-\uFFEF]+)/u);
         if (handleMatch) {
           return handleMatch[1];
         }
@@ -82,11 +83,14 @@ class YouTubeProvider extends BaseProvider {
     } catch (err) {}
 
     // Match raw input handles like "てえんださん" or "@てえんださん"
-    const decodedRaw = decodeURIComponent(target);
-    const match = decodedRaw.match(/^@?([a-zA-Z0-9_\-\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\uFF00-\uFFEF]+)$/u);
-    if (match) {
-      return match[1];
-    }
+    try {
+      const decodedRaw = decodeURIComponent(target);
+      const match = decodedRaw.match(/^@?([a-zA-Z0-9_\-\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\uFF00-\uFFEF]+)$/u);
+      if (match) {
+        return match[1];
+      }
+    } catch (err) {}
+    
     return null;
   }
 
