@@ -77,48 +77,90 @@ class YouTubeProvider extends BaseProvider {
   }
 
 async fetchChannelLiveStream(channelHandle) {
-    try {
-      console.log(`[YouTubeProvider] Dynamic lookup tracking active for channel: @${channelHandle}`);
-      const channelUrl = `https://www.youtube.com/@${channelHandle}/live`;
-      const response = await axios.get(channelUrl, {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept-Language': 'en-US,en;q=0.9',
-        },
-      });
+  try {
+    console.log(
+      `[YouTubeProvider] Dynamic lookup tracking active for channel: @${channelHandle}`
+    );
 
-      // Guard: Check if your scraper hit an unauthenticated cookie consent or bot wall
-      if (response.data.includes('consent.youtube.com') || response.data.includes('captcha')) {
-        console.warn(`[YouTubeProvider] Warning: YouTube issued a bot challenge or consent wall for @${channelHandle}.`);
-        return null;
-      }
+    const channelUrl = `https://www.youtube.com/@${channelHandle}/live`;
 
-      // Extract the video ID safely from the primary player's internal videoDetails block.
-      // This ignores sidebar recommendations while successfully capturing the active video ID.
-      const playerMatch = response.data.match(/"videoDetails"\s*:\s*\{[^}]*"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/);
-      const videoId = playerMatch ? playerMatch[1] : null;
+    const response = await axios.get(channelUrl, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
 
-      if (!videoId) {
-        return null;
-      }
+        // Consent-wall bypass
+        Cookie: 'CONSENT=YES+cb; SOCS=CAI',
 
-      // Verify that this specific main player item is actually live, rather than a channel trailer VOD
-      const isLiveActive = response.data.includes('"isLive":true') || 
-                           response.data.includes('"isLiveStream":true') || 
-                           response.data.includes('"style":"LIVE"');
+        // Browser-like headers
+        'Sec-Ch-Ua':
+          '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
 
-      if (!isLiveActive) {
-        return null;
-      }
+        Referer: 'https://www.youtube.com/',
+        Origin: 'https://www.youtube.com',
+      },
 
-      console.log(`[YouTubeProvider] Successfully isolated verified active live stream ID: ${videoId}`);
-      return videoId;
-    } catch (err) {
-      console.error(`[YouTubeProvider] Error resolving dynamic channel stream:`, err.message);
+      maxRedirects: 10,
+    });
+
+    // Detect common challenge pages
+    if (
+      response.data.includes('consent.youtube.com') ||
+      response.data.includes('captcha') ||
+      response.data.includes('g-recaptcha') ||
+      response.data.includes('www.google.com/sorry') ||
+      response.data.includes('Our systems have detected unusual traffic')
+    ) {
+      console.warn(
+        `[YouTubeProvider] Warning: YouTube issued a bot challenge or consent wall for @${channelHandle}.`
+      );
       return null;
     }
+
+    // Prefer the active player's videoDetails block
+    const playerMatch = response.data.match(
+      /"videoDetails"\s*:\s*\{[^}]*"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/
+    );
+
+    const videoId = playerMatch ? playerMatch[1] : null;
+
+    if (!videoId) {
+      console.log(
+        `[YouTubeProvider] No active video ID found for @${channelHandle}`
+      );
+      return null;
+    }
+
+    const isLiveActive =
+      response.data.includes('"isLive":true') ||
+      response.data.includes('"isLiveStream":true') ||
+      response.data.includes('"style":"LIVE"') ||
+      response.data.includes('"badgeStyle":"BADGE_STYLE_TYPE_LIVE_NOW"');
+
+    if (!isLiveActive) {
+      console.log(
+        `[YouTubeProvider] Channel @${channelHandle} is not currently live`
+      );
+      return null;
+    }
+
+    console.log(
+      `[YouTubeProvider] Successfully isolated verified active live stream ID: ${videoId}`
+    );
+
+    return videoId;
+  } catch (err) {
+    console.error(
+      `[YouTubeProvider] Error resolving dynamic channel stream:`,
+      err.response?.status || err.message
+    );
+
+    return null;
   }
+}
 
   extractVideoId(target) {
     try {
