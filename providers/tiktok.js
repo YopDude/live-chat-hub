@@ -41,7 +41,8 @@ class TikTokProvider extends BaseProvider {
       this.onMessage({
         id: `tiktok_${Date.now()}_${this.messageCounter}`,
         platform: 'tiktok',
-        username: data.uniqueId || data.nickname || 'TikTok User',
+        // Swapped to prioritize nickname (Display Name) over uniqueId
+        username: data.nickname || data.uniqueId || 'TikTok User',
         message: data.comment || '',
         timestamp: new Date().toISOString(),
         isSystemAlert: false,
@@ -52,7 +53,8 @@ class TikTokProvider extends BaseProvider {
     this.connection.on('gift', (data) => {
       this.messageCounter++;
       const giftName = data.giftName || 'Gift';
-      const username = data.uniqueId || data.nickname || 'TikTok User';
+      // Swapped here as well to keep consistency
+      const username = data.nickname || data.uniqueId || 'TikTok User';
       this.onMessage({
         id: `tiktok_gift_${Date.now()}_${this.messageCounter}`,
         platform: 'tiktok',
