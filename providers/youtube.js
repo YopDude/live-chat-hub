@@ -88,9 +88,8 @@ class YouTubeProvider extends BaseProvider {
     return null;
   }
 
-  /**
-   * Resolves the active live stream video ID using direct HTML parsing.
-   * Leverages an explicit verification step to filter out recommendations.
+/**
+   * Resolves the active live stream video ID using robust JSON extraction.
    */
   async fetchChannelLiveStream(channelHandle) {
     try {
@@ -100,8 +99,9 @@ class YouTubeProvider extends BaseProvider {
       const liveUrl = `https://www.youtube.com/@${safeHandle}/live`;
       const response = await axios.get(liveUrl, {
         headers: {
+          // A modern desktop User-Agent ensures you get standard desktop ytInitialData payloads
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
           'Cache-Control': 'no-cache'
         }
       });
@@ -109,25 +109,40 @@ class YouTubeProvider extends BaseProvider {
       const html = response.data;
       let discoveredVideoId = null;
 
-      // Method 1: Canonical elements check
+      // Step 1: Look for the precise canonical URL link element first
       const canonicalMatch = html.match(/<link\s+rel="canonical"\s+href="https:\/\/www\.youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})"/);
       if (canonicalMatch && canonicalMatch[1]) {
         discoveredVideoId = canonicalMatch[1];
+        console.log(`[YouTubeProvider] Found live stream ID via canonical tag: ${discoveredVideoId}`);
+        return discoveredVideoId;
       }
 
-      // Method 2: Target player object config block
+      // Step 2: Extract and parse ytInitialData to find the exact active video
+      const jsonMatch = html.match(/ytInitialData\s*=\s*(\{[\s\S]*?\});/) || 
+                        html.match(/window\["ytInitialData"\]\s*=\s*(\{[\s\S]*?\})\s*;/);
+
+      if (jsonMatch) {
+        try {
+          const parsedData = JSON.parse(jsonMatch[1]);
+          
+          // Drill down into the specific response context player template or configuration details
+          // This path maps directly to the primary video playing on the page
+          const videoIdFromContext = parsedData?.currentVideoEndpoint?.watchEndpoint?.videoId ||
+                                     parsedData?.playerOverlays?.liveChatRenderer?.liveChatId; // Often matches the video ID
+
+          if (videoIdFromContext && /^[a-zA-Z0-9_-]{11}$/.test(videoIdFromContext)) {
+            discoveredVideoId = videoIdFromContext;
+          }
+        } catch (e) {
+          console.warn(`[YouTubeProvider] Failed parsing ytInitialData block structural payload.`);
+        }
+      }
+
+      // Fallback Method: Strict videoDetails contextual regex matching (safer than global videoId matches)
       if (!discoveredVideoId) {
         const embeddedConfig = html.match(/"videoDetails":\s*\{[^}]*?"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/);
         if (embeddedConfig && embeddedConfig[1]) {
           discoveredVideoId = embeddedConfig[1];
-        }
-      }
-
-      // Method 3: Broad match fallback
-      if (!discoveredVideoId) {
-        const generalMatch = html.match(/"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/);
-        if (generalMatch && generalMatch[1]) {
-          discoveredVideoId = generalMatch[1];
         }
       }
 
@@ -139,16 +154,17 @@ class YouTubeProvider extends BaseProvider {
         });
         
         const verifyHtml = verifyResponse.data;
+        
+        // Explicitly check for the presence of the video creator's handle within the embed frame configurations
         const isCorrectChannel = 
-          verifyHtml.includes(`@${channelHandle}`) || 
-          verifyHtml.includes(safeHandle) ||
-          verifyHtml.toLowerCase().includes(channelHandle.toLowerCase());
+          verifyHtml.includes(`"author":"@${channelHandle}"`) ||
+          verifyHtml.toLowerCase().includes(`/@${channelHandle.toLowerCase()}`);
 
         if (isCorrectChannel) {
           console.log(`[YouTubeProvider] Verified stream ID for @${channelHandle}: ${discoveredVideoId}`);
           return discoveredVideoId;
         } else {
-          console.warn(`[YouTubeProvider] Verification mismatch: Discovered ID ${discoveredVideoId} belongs to recommendations, discarding.`);
+          console.warn(`[YouTubeProvider] Verification mismatch: Discovered ID ${discoveredVideoId} belongs to recommendations/mix, discarding.`);
         }
       }
 
