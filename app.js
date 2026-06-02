@@ -1,4 +1,14 @@
+// --- GLOBAL INITIALIZATIONS & DOM ELEMENTS ---
 const socket = io('https://live-chat-hub.onrender.com'); // Changes automatically based on deployment URL
+
+const chatTimeline = document.getElementById('chat-timeline');
+const statusBanner = document.getElementById('status-banner');
+const sourcePanel = document.getElementById('source-manager-panel');
+const managerToggleBtn = document.getElementById('manager-toggle-btn');
+const closePanelBtn = document.getElementById('close-panel-btn');
+
+let streamSources = JSON.parse(localStorage.getItem('chatSources')) || [];
+let ACTIVE_PROFILE = null;
 
 // --- DYNAMIC PROFILE CONFIGURATIONS ---
 const PROFILES = {
@@ -8,26 +18,18 @@ const PROFILES = {
       { platform: 'youtube', target: 'https://www.youtube.com/@kakage_truth' },
       { platform: 'twitch',  target: 'brtamagawa' }
     ]
-  },
-  // You can easily scale this later:
-  // admin: {
-  //   globalMuted: false,
-  //   sources: [{ platform: 'twitch', target: 'ninja' }]
-  // }
+  }
 };
 
 // --------------------------------------------------
 // PROFILE ACCESS CONTROL
 // --------------------------------------------------
-
-const SECRET_HASH =
-  '3c1bf06375a231a024e02ff86402e14dbfc91298a86178e197ceb4ae3630fef0';
+const SECRET_HASH = '3c1bf06375a231a024e02ff86402e14dbfc91298a86178e197ceb4ae3630fef0';
 
 const urlParams = new URLSearchParams(window.location.search);
 const suppliedProfile = urlParams.get('p')?.toLowerCase() || '';
 
-// Lightweight client-side hash check.
-// This is only intended to keep casual users out.
+// Lightweight client-side hash check for casual users
 async function sha256(text) {
   const encoder = new TextEncoder();
   const data = encoder.encode(text);
@@ -37,9 +39,6 @@ async function sha256(text) {
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
 }
-
-let ACTIVE_PROFILE = null;
-let streamSources = [];
 
 async function initializeProfile() {
   const suppliedHash = await sha256(suppliedProfile);
@@ -53,6 +52,8 @@ async function initializeProfile() {
         height:100vh;
         font-size:2rem;
         font-family:sans-serif;
+        background-color: #1a202c;
+        color: #e2e8f0;
       ">
         404 Not Found
       </div>
@@ -61,27 +62,24 @@ async function initializeProfile() {
   }
 
   ACTIVE_PROFILE = PROFILES.shiho;
-
   console.log('[PROFILE ACTIVATED] Loading profile: shiho');
 
-  streamSources = ACTIVE_PROFILE.sources.map((src, index) => ({
-    id: `profile-preset-${index}`,
-    platform: src.platform,
-    target: src.target,
-    isPaused: false,
-    isMuted: ACTIVE_PROFILE.globalMuted
-  }));
+  // Fallback to presets ONLY if the user hasn't saved custom sources yet
+  if (streamSources.length === 0) {
+    streamSources = ACTIVE_PROFILE.sources.map((src, index) => ({
+      id: `profile-preset-${index}`,
+      platform: src.platform,
+      target: src.target,
+      isPaused: false,
+      isMuted: ACTIVE_PROFILE.globalMuted
+    }));
+    localStorage.setItem('chatSources', JSON.stringify(streamSources));
+  }
 
   return true;
 }
 
-const chatTimeline = document.getElementById('chat-timeline');
-const statusBanner = document.getElementById('status-banner');
-
-const socket = io('https://live-chat-hub.onrender.com'); // Changes automatically based on deployment URL
-let streamSources = JSON.parse(localStorage.getItem('chatSources')) || [];
-const chatTimeline = document.getElementById('chat-timeline');
-const statusBanner = document.getElementById('status-banner');
+// --- CORE APPLICATION UTILITIES ---
 
 function showStatus(message, type = 'info') {
   statusBanner.textContent = message;
@@ -169,15 +167,11 @@ socket.on('connect_error', (err) => {
   showStatus('Unable to connect to server. Check your connection and refresh the page.', 'error');
 });
 
-// Socket error handler
 socket.on('error', (err) => {
   console.error('Socket error:', err);
 });
 
-// UI Event Handlers
-const sourcePanel = document.getElementById('source-manager-panel');
-const managerToggleBtn = document.getElementById('manager-toggle-btn');
-const closePanelBtn = document.getElementById('close-panel-btn');
+// --- UI EVENT HANDLERS & MANAGEMENT ---
 
 function toggleSourcePanel() {
   sourcePanel.classList.toggle('hidden');
@@ -227,7 +221,7 @@ document.getElementById('add-btn').addEventListener('click', () => {
   });
 });
 
-// Platform selector dropdown
+// Platform selector dropdown configuration
 window.selectedPlatform = 'twitch';
 const platformToggleBtn = document.getElementById('platform-toggle-btn');
 const platformDropdown = document.getElementById('platform-dropdown');
@@ -265,7 +259,6 @@ platformOptions.forEach((option) => {
   });
 });
 
-// Close dropdown when clicking outside
 document.addEventListener('click', (e) => {
   if (!platformToggleBtn.contains(e.target) && !platformDropdown.contains(e.target)) {
     platformDropdown.classList.add('hidden');
@@ -299,13 +292,12 @@ function renderSourceCards() {
   });
 }
 
-// Parse Twitch emotes from raw emotes object
+// Parse Twitch emotes safely from right-to-left to avoid range mapping corruption
 function parseTwitchEmotes(message, emotesObj) {
   if (!emotesObj || typeof emotesObj !== 'object' || Object.keys(emotesObj).length === 0) {
     return escapeHtml(message);
   }
 
-  // Collect all position ranges with their emote IDs
   const replacements = [];
   for (const [emoteId, positions] of Object.entries(emotesObj)) {
     if (Array.isArray(positions)) {
@@ -313,7 +305,7 @@ function parseTwitchEmotes(message, emotesObj) {
         const [start, end] = posRange.split('-').map(Number);
         replacements.push({
           start,
-          end: end + 1, // Convert to exclusive end index
+          end: end + 1, 
           emoteId,
           text: message.substring(start, end + 1),
         });
@@ -321,22 +313,27 @@ function parseTwitchEmotes(message, emotesObj) {
     }
   }
 
-  // Sort in descending order by start position (replace from end to avoid index shifting)
+  // Sort descending by start position to safely split without affecting prior indexes
   replacements.sort((a, b) => b.start - a.start);
 
-  // Build the HTML string by replacing emote ranges
-  let result = escapeHtml(message);
+  let lastIdx = message.length;
+  let htmlParts = [];
+
   for (const replacement of replacements) {
+    if (replacement.end < lastIdx) {
+      htmlParts.unshift(escapeHtml(message.substring(replacement.end, lastIdx)));
+    }
     const emoteUrl = `https://static-cdn.jtvnw.net/emoticons/v2/${replacement.emoteId}/default/dark/1.0`;
     const emoteHtml = `<img src="${emoteUrl}" alt="${escapeHtml(replacement.text)}" class="twitch-emote" title="${escapeHtml(replacement.text)}" loading="lazy">`;
-    // Need to re-escape and slice carefully since we're working with escaped HTML
-    const beforeEscape = message.substring(0, replacement.start);
-    const afterEscape = message.substring(replacement.end);
-    result = escapeHtml(beforeEscape) + emoteHtml + escapeHtml(afterEscape);
-    message = beforeEscape + replacement.text + afterEscape; // Update for next iteration
+    htmlParts.unshift(emoteHtml);
+    lastIdx = replacement.start;
   }
 
-  return result;
+  if (lastIdx > 0) {
+    htmlParts.unshift(escapeHtml(message.substring(0, lastIdx)));
+  }
+
+  return htmlParts.join('');
 }
 
 function renderMessageToTimeline(msg) {
@@ -346,7 +343,6 @@ function renderMessageToTimeline(msg) {
   const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const iconSrc = msg.iconUrl || platformIcons[msg.platform.toLowerCase()] || 'assets/twch_icon.png';
 
-  // Handle Twitch messages with native emote parsing
   if (msg.platform === 'twitch') {
     const messageHtml = parseTwitchEmotes(msg.message, msg.emotes);
     item.innerHTML = `
@@ -381,14 +377,13 @@ function renderMessageToTimeline(msg) {
   chatTimeline.scrollTop = chatTimeline.scrollHeight;
 }
 
-// Utility to prevent XSS attacks
 function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
 }
 
-// Interactive runtime control functions
+// Runtime Control Adjustments
 window.togglePause = (id) => {
   const src = streamSources.find((s) => s.id === id);
   if (!src) return;
@@ -424,26 +419,22 @@ window.removeSource = (id) => {
   }
 };
 
+// Theme preference toggles
 document.addEventListener('DOMContentLoaded', () => {
     const themeToggleBtn = document.getElementById('theme-toggle-btn');
     const body = document.body;
-
-    // Check localStorage or device preferences for default theme preference
     const savedTheme = localStorage.getItem('theme');
     
     if (savedTheme === 'light') {
         body.classList.add('light-mode');
         themeToggleBtn.textContent = '🌙 Dark Mode';
     } else {
-        // Default is dark mode, no classes needed
         body.classList.remove('light-mode');
         themeToggleBtn.textContent = '☀️ Light Mode';
     }
 
-    // Toggle click event
     themeToggleBtn.addEventListener('click', () => {
         body.classList.toggle('light-mode');
-        
         if (body.classList.contains('light-mode')) {
             themeToggleBtn.textContent = '🌙 Dark Mode';
             localStorage.setItem('theme', 'light');
@@ -454,6 +445,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
+// App Initiation Gateway
 initializeProfile().then((allowed) => {
   if (allowed) {
     init();
