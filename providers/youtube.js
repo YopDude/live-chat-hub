@@ -93,64 +93,93 @@ class YouTubeProvider extends BaseProvider {
     return null;
   }
 
+  /**
+   * Scrapes the channel's /streams tab to structurally isolate the truly live video card.
+   */
   async fetchChannelLiveStream(channelHandle) {
     try {
-      console.log(`[YouTubeProvider] Fetching live stream for channel: ${channelHandle}`);
-      const channelUrl = `https://www.youtube.com/@${channelHandle}/live`;
+      console.log(`[YouTubeProvider] Fetching active stream metadata for channel: ${channelHandle}`);
       
-      // Crucial: Use a modern, ultra-clean User-Agent and headers to bypass YouTube cookie challenges
-      const response = await axios.get(channelUrl, {
+      // Scraping the /streams tab guarantees we get structural layout lists instead of direct watch layout shifts
+      const targetUrl = `https://www.youtube.com/@${channelHandle}/streams`;
+      
+      const response = await axios.get(targetUrl, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
           'Accept-Language': 'en-US,en;q=0.9',
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
+          'Cache-Control': 'no-cache'
         },
       });
 
       const html = response.data;
+      const match = html.match(/window\["ytInitialData"\]\s*=\s*(\{[\s\S]*?\})\s*;<\/script>/) || 
+                    html.match(/ytInitialData\s*=\s*(\{[\s\S]*?\});/);
 
-      // Check if we hit a challenge/redirect wall
-      if (html.includes('consent.youtube.com') || html.includes('Service Unavailable') || html.includes('robot_janitor')) {
-        console.error(`[YouTubeProvider] Blocked by a YouTube challenge or bot wall for channel: ${channelHandle}`);
-        return null;
+      if (!match) {
+        console.warn(`[YouTubeProvider] Failed to extract structural JSON layout data for @${channelHandle}. Triggering backup parsing...`);
+        return this.backupRegexParser(html);
       }
 
-      // Method 1: Canonical URL
-      const canonicalMatch = html.match(/<link\s+rel="canonical"\s+href="https:\/\/www\.youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})"/);
-      if (canonicalMatch && canonicalMatch[1]) {
-        console.log(`[YouTubeProvider] Found live stream video ID via canonical link: ${canonicalMatch[1]}`);
-        return canonicalMatch[1];
-      }
-
-      // Method 2: Open Graph URL Tag
-      const ogMatch = html.match(/<meta\s+property="og:url"\s+content="https:\/\/www\.youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})"/);
-      if (ogMatch && ogMatch[1]) {
-        console.log(`[YouTubeProvider] Found live stream video ID via OG tag: ${ogMatch[1]}`);
-        return ogMatch[1];
-      }
-
-      // Method 3: Live Indicator Structural Parse (Nested within VideoDetails)
-      const playerMatch = html.match(/"videoDetails"\s*:\s*\{[^}]*"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/);
-      if (playerMatch && playerMatch[1]) {
-        console.log(`[YouTubeProvider] Found active player video ID: ${playerMatch[1]}`);
-        return playerMatch[1];
-      }
+      const ytInitialData = JSON.parse(match[1]);
       
-      // Method 4: Fallback to scanning raw watch path patterns inside script tags
-      const rawWatchMatch = html.match(/"href"\s*:\s*"https:\/\/www\.youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})"/);
-      if (rawWatchMatch && rawWatchMatch[1]) {
-        console.log(`[YouTubeProvider] Found active video ID via fallback href pattern: ${rawWatchMatch[1]}`);
-        return rawWatchMatch[1];
+      // Traverse down into the active tab contents structurally
+      const activeVideoId = this.scanRenderersForLiveBadge(ytInitialData);
+      if (activeVideoId) {
+        console.log(`[YouTubeProvider] Found live stream video ID: ${activeVideoId}`);
+        return activeVideoId;
       }
 
-      console.warn(`[YouTubeProvider] No live stream found for channel: ${channelHandle}`);
-      return null;
+      // Check fallback regex just in case extraction was fine but tree structure has mutated slightly
+      return this.backupRegexParser(html);
     } catch (err) {
-      console.error(`[YouTubeProvider] Error fetching channel stream:`, err.message);
+      console.error(`[YouTubeProvider] Error identifying active stream:`, err.message);
       return null;
     }
+  }
+
+  /**
+   * Recursively looks for a videoRenderer containing a live badge inside the data tree.
+   */
+  scanRenderersForLiveBadge(node) {
+    if (!node || typeof node !== 'object') return null;
+
+    if (node.videoRenderer) {
+      const renderer = node.videoRenderer;
+      const badges = renderer.thumbnailOverlays || [];
+      
+      // Look for a structural 'STYLE_TYPE_LIVE' overlay marker inside the video layout card
+      const isLive = JSON.stringify(badges).includes('BADGE_STYLE_TYPE_LIVE') || 
+                     JSON.stringify(renderer.badges).includes('LIVE');
+                     
+      if (isLive && renderer.videoId) {
+        return renderer.videoId;
+      }
+    }
+
+    if (Array.isArray(node)) {
+      for (const element of node) {
+        const found = this.scanRenderersForLiveBadge(element);
+        if (found) return found;
+      }
+    } else {
+      for (const value of Object.values(node)) {
+        const found = this.scanRenderersForLiveBadge(value);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  backupRegexParser(html) {
+    // Looks for explicit canonical URLs pointing to watch?v= matching elements inside scripts
+    const canonicalMatch = html.match(/<link\s+rel="canonical"\s+href="https:\/\/www\.youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})"/);
+    if (canonicalMatch && canonicalMatch[1]) return canonicalMatch[1];
+
+    const structuralMatch = html.match(/"videoRenderer":\s*\{\s*"videoId":\s*"([a-zA-Z0-9_-]{11})"[^}]+"style":\s*"BADGE_STYLE_TYPE_LIVE"/);
+    if (structuralMatch && structuralMatch[1]) return structuralMatch[1];
+    
+    return null;
   }
 
   buildChatUrl() {
@@ -160,20 +189,17 @@ class YouTubeProvider extends BaseProvider {
   async fetchInitialData() {
     const response = await axios.get(this.buildChatUrl(), {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         'Accept-Language': 'en-US,en;q=0.9',
       },
     });
 
     const html = response.data;
-    
-    // Multiple regex variations since YouTube alternates script formats based on location/load
     const match = html.match(/window\["ytInitialData"\]\s*=\s*(\{[\s\S]*?\})\s*;<\/script>/) || 
-                  html.match(/ytInitialData\s*=\s*(\{[\s\S]*?\});/) ||
-                  html.match(/">window\["ytInitialData"\]\s*=\s*([\s\S]*?);<\/script>/);
+                  html.match(/ytInitialData\s*=\s*(\{[\s\S]*?\});/);
                   
     if (!match) {
-      throw new Error('Unable to locate ytInitialData in YouTube live chat page (Possibility of Rate Limit/Bot Wall)');
+      throw new Error('Unable to locate ytInitialData in YouTube live chat page. Challenge walls or IP restrictions are currently active.');
     }
 
     return JSON.parse(match[1]);
@@ -292,7 +318,6 @@ class YouTubeProvider extends BaseProvider {
   start() {
     if (this.isActive) return;
 
-    // Evaluates parsed normalized target accurately
     if (this.normalizedTarget && this.normalizedTarget.startsWith('@')) {
       const channelHandle = this.normalizedTarget.substring(1);
       this.fetchChannelLiveStream(channelHandle)
@@ -301,7 +326,7 @@ class YouTubeProvider extends BaseProvider {
             this.videoId = videoId;
             this.startPolling();
           } else {
-            console.error(`[YouTubeProvider] No active live stream found for channel @${channelHandle}. Verify privacy configurations.`);
+            console.error(`[YouTubeProvider] No active live stream found for channel @${channelHandle}. Verify channel setup.`);
           }
         })
         .catch((err) => {
