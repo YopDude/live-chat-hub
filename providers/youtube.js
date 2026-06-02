@@ -87,21 +87,34 @@ class YouTubeProvider extends BaseProvider {
         headers: {
           'User-Agent':
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36',
+          'Accept-Language': 'en-US,en;q=0.9',
         },
       });
 
-      // Extract video ID from the response
-      const idMatch = response.data.match(/(?:"videoId"|"VIDEO_ID")\s*:\s*"([a-zA-Z0-9_-]{11})"/);
-      if (idMatch && idMatch[1]) {
-        console.log(`[YouTubeProvider] Found live stream video ID: ${idMatch[1]}`);
-        return idMatch[1];
+      const html = response.data;
+
+      // Method 1: Canonical URL (YouTube /live redirects set the canonical link to the active broadcast)
+      const canonicalMatch = html.match(/<link\s+rel="canonical"\s+href="https:\/\/www\.youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})"/);
+      if (canonicalMatch && canonicalMatch[1]) {
+        console.log(`[YouTubeProvider] Found live stream video ID via canonical link: ${canonicalMatch[1]}`);
+        return canonicalMatch[1];
       }
 
-      // Fallback: search for the generic object key with videoId
-      const fallbackMatch = response.data.match(/"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/);
-      if (fallbackMatch && fallbackMatch[1]) {
-        console.log(`[YouTubeProvider] Found live stream video ID via fallback: ${fallbackMatch[1]}`);
-        return fallbackMatch[1];
+      // Method 2: Open Graph URL Tag
+      const ogMatch = html.match(/<meta\s+property="og:url"\s+content="https:\/\/www\.youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})"/);
+      if (ogMatch && ogMatch[1]) {
+        console.log(`[YouTubeProvider] Found live stream video ID via OG tag: ${ogMatch[1]}`);
+        return ogMatch[1];
+      }
+
+      // Method 3: The main player's videoDetails block
+      const playerMatch = html.match(
+        /"videoDetails"\s*:\s*\{[^}]*"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/
+      );
+
+      if (playerMatch && playerMatch[1]) {
+        console.log(`[YouTubeProvider] Found active player video ID: ${playerMatch[1]}`);
+        return playerMatch[1];
       }
       
       console.warn(`[YouTubeProvider] No live stream found for channel: ${channelHandle}`);
@@ -111,7 +124,6 @@ class YouTubeProvider extends BaseProvider {
       return null;
     }
   }
-
 
   extractVideoId(target) {
     // First try to extract a video ID
