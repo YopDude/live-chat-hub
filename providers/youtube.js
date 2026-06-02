@@ -91,70 +91,41 @@ class YouTubeProvider extends BaseProvider {
   }
 
   /**
-   * Fetches the channel's active live stream video ID using a combination of 
-   * the ultra-stable RSS Feed fallback and direct DOM inspection.
+   * Resolves the active live stream video ID using YouTube's official open oEmbed endpoint.
+   * This cleanly bypasses cookie challenges, bot walls, and regional consent prompts.
    */
   async fetchChannelLiveStream(channelHandle) {
     try {
-      console.log(`[YouTubeProvider] Resolving active live stream for: @${channelHandle}`);
+      console.log(`[YouTubeProvider] Querying oEmbed API for channel live stream: @${channelHandle}`);
       
-      // Phase 1: Try reading the channel page frontend with layout-proof lookaheads
-      const channelUrl = `https://www.youtube.com/@${channelHandle}/live`;
-      const response = await axios.get(channelUrl, {
+      const liveUrl = `https://www.youtube.com/@${channelHandle}/live`;
+      const oEmbedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(liveUrl)}&format=json`;
+
+      const response = await axios.get(oEmbedUrl, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          'Accept-Language': 'en-US,en;q=0.9',
-        },
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        }
       });
 
-      const html = response.data;
-
-      // Check canonical link patterns first
-      const canonicalMatch = html.match(/<link\s+rel="canonical"\s+href="https:\/\/www\.youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})"/);
-      if (canonicalMatch && canonicalMatch[1]) {
-        return canonicalMatch[1];
-      }
-
-      // Phase 2: RSS Feed parsing fallback (Unbrickable via layout challenges)
-      // We look for the external channel ID channel token inside the layout to query the XML feed
-      const channelIdMatch = html.match(/"channelId"\s*:\s*"([a-zA-Z0-9_-]{24})"/);
-      if (channelIdMatch && channelIdMatch[1]) {
-        const rssUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelIdMatch[1]}`;
-        const rssResponse = await axios.get(rssUrl);
-        const rssFeed = rssResponse.data;
-        
-        // Find the most recent video ID uploaded/streamed in the XML feed stream
-        const videoIdMatches = [...rssFeed.matchAll(/<yt:videoId>([a-zA-Z0-9_-]{11})<\/yt:videoId>/g)];
-        if (videoIdMatches.length > 0) {
-          // Check the top 2 items to see if either are active live streams
-          for (const match of videoIdMatches.slice(0, 2)) {
-            const potentialId = match[1];
-            // Double check if this recent video ID is actually an active live stream chat room
-            const isLive = await this.verifyIsLive(potentialId);
-            if (isLive) return potentialId;
-          }
+      // When a channel is live, oEmbed resolves the target redirect and returns the active stream's metadata
+      if (response.data && response.data.html) {
+        const htmlEmbed = response.data.html;
+        const match = htmlEmbed.match(/\/embed\/([a-zA-Z0-9_-]{11})/);
+        if (match && match[1]) {
+          console.log(`[YouTubeProvider] Successfully found live video ID via oEmbed: ${match[1]}`);
+          return match[1];
         }
       }
-
-      // Final dynamic structural text trace fallback
-      const fallbackMatch = html.match(/"liveStreamRenderer".*?"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/);
-      if (fallbackMatch && fallbackMatch[1]) return fallbackMatch[1];
-
+      
       return null;
     } catch (err) {
-      console.error(`[YouTubeProvider] Error identifying channel state:`, err.message);
+      // If the channel is completely offline, the oEmbed endpoint returns a 404 Not Found error
+      if (err.response && err.response.status === 404) {
+        console.warn(`[YouTubeProvider] Channel @${channelHandle} is confirmed offline (oEmbed returned 404).`);
+      } else {
+        console.error(`[YouTubeProvider] oEmbed connection error:`, err.message);
+      }
       return null;
-    }
-  }
-
-  async verifyIsLive(videoId) {
-    try {
-      const response = await axios.get(`https://www.youtube.com/live_chat?v=${videoId}`, {
-        headers: { 'User-Agent': 'Mozilla/5.0' }
-      });
-      return response.data.includes('ytInitialData') && !response.data.includes('isLive":false');
-    } catch {
-      return false;
     }
   }
 
@@ -175,7 +146,7 @@ class YouTubeProvider extends BaseProvider {
                   html.match(/ytInitialData\s*=\s*(\{[\s\S]*?\});/);
                   
     if (!match) {
-      throw new Error('Unable to extract ytInitialData token payload. Rate limit challenge wall active.');
+      throw new Error('Unable to extract live chat initial data array due to security filtering.');
     }
 
     return JSON.parse(match[1]);
@@ -283,13 +254,10 @@ class YouTubeProvider extends BaseProvider {
     }
   }
 
-  /**
-   * OVERRIDE: Modified to synchronize seamlessly with BaseProvider state rules instantly
-   */
   start() {
     if (this.isActive) return;
     
-    // Crucial: Set active status IMMEDIATELY so parent orchestration code maps sync loops correctly
+    // Set status to active immediately to cleanly bind to BaseProvider runtime rules
     super.start(); 
 
     if (this.normalizedTarget && this.normalizedTarget.startsWith('@')) {
@@ -300,12 +268,12 @@ class YouTubeProvider extends BaseProvider {
             this.videoId = videoId;
             this.startPolling();
           } else {
-            console.error(`[YouTubeProvider] No active live stream found for channel @${channelHandle}.`);
+            console.error(`[YouTubeProvider] Active live stream resolution failed for @${channelHandle}.`);
             this.stop();
           }
         })
         .catch((err) => {
-          console.error(`[YouTubeProvider] Error resolving channel live stream:`, err);
+          console.error(`[YouTubeProvider] Error identifying stream routing state:`, err);
           this.stop();
         });
       return;
