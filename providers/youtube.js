@@ -45,12 +45,10 @@ class YouTubeProvider extends BaseProvider {
   }
 
   static extractVideoIdStatic(target) {
-    // 1. Check if it's already a raw 11-char video ID
     if (/^[a-zA-Z0-9_-]{11}$/.test(target)) {
       return target;
     }
 
-    // 2. Try URL parser safely
     try {
       if (target.startsWith('http://') || target.startsWith('https://')) {
         const url = new URL(target);
@@ -64,10 +62,9 @@ class YouTubeProvider extends BaseProvider {
         }
       }
     } catch (err) {
-      // Fallback
+      // Fallthrough
     }
 
-    // 3. Fallback to Regex
     const match = target.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
     if (match) {
       return match[1];
@@ -86,10 +83,9 @@ class YouTubeProvider extends BaseProvider {
         }
       }
     } catch (err) {
-      // Fallback
+      // Fallthrough
     }
 
-    // Handle raw channel names like "ThaRixer" or "@ThaRixer"
     const match = target.match(/^@?([a-zA-Z0-9_-]+)$/);
     if (match) {
       return match[1];
@@ -101,15 +97,25 @@ class YouTubeProvider extends BaseProvider {
     try {
       console.log(`[YouTubeProvider] Fetching live stream for channel: ${channelHandle}`);
       const channelUrl = `https://www.youtube.com/@${channelHandle}/live`;
+      
+      // Crucial: Use a modern, ultra-clean User-Agent and headers to bypass YouTube cookie challenges
       const response = await axios.get(channelUrl, {
         headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
           'Accept-Language': 'en-US,en;q=0.9',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
         },
       });
 
       const html = response.data;
+
+      // Check if we hit a challenge/redirect wall
+      if (html.includes('consent.youtube.com') || html.includes('Service Unavailable') || html.includes('robot_janitor')) {
+        console.error(`[YouTubeProvider] Blocked by a YouTube challenge or bot wall for channel: ${channelHandle}`);
+        return null;
+      }
 
       // Method 1: Canonical URL
       const canonicalMatch = html.match(/<link\s+rel="canonical"\s+href="https:\/\/www\.youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})"/);
@@ -125,18 +131,18 @@ class YouTubeProvider extends BaseProvider {
         return ogMatch[1];
       }
 
-      // Method 3: Live Indicator / Video Details structural parsing
+      // Method 3: Live Indicator Structural Parse (Nested within VideoDetails)
       const playerMatch = html.match(/"videoDetails"\s*:\s*\{[^}]*"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/);
       if (playerMatch && playerMatch[1]) {
         console.log(`[YouTubeProvider] Found active player video ID: ${playerMatch[1]}`);
         return playerMatch[1];
       }
       
-      // Method 4: Loose watch link fallback match
-      const looseWatchMatch = html.match(/"liveStreamRenderer".*?"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/);
-      if (looseWatchMatch && looseWatchMatch[1]) {
-        console.log(`[YouTubeProvider] Found active video ID in live stream renderer: ${looseWatchMatch[1]}`);
-        return looseWatchMatch[1];
+      // Method 4: Fallback to scanning raw watch path patterns inside script tags
+      const rawWatchMatch = html.match(/"href"\s*:\s*"https:\/\/www\.youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})"/);
+      if (rawWatchMatch && rawWatchMatch[1]) {
+        console.log(`[YouTubeProvider] Found active video ID via fallback href pattern: ${rawWatchMatch[1]}`);
+        return rawWatchMatch[1];
       }
 
       console.warn(`[YouTubeProvider] No live stream found for channel: ${channelHandle}`);
@@ -154,17 +160,20 @@ class YouTubeProvider extends BaseProvider {
   async fetchInitialData() {
     const response = await axios.get(this.buildChatUrl(), {
       headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
       },
     });
 
     const html = response.data;
+    
+    // Multiple regex variations since YouTube alternates script formats based on location/load
     const match = html.match(/window\["ytInitialData"\]\s*=\s*(\{[\s\S]*?\})\s*;<\/script>/) || 
-                  html.match(/ytInitialData\s*=\s*(\{[\s\S]*?\});/);
+                  html.match(/ytInitialData\s*=\s*(\{[\s\S]*?\});/) ||
+                  html.match(/">window\["ytInitialData"\]\s*=\s*([\s\S]*?);<\/script>/);
                   
     if (!match) {
-      throw new Error('Unable to locate ytInitialData in YouTube live chat page');
+      throw new Error('Unable to locate ytInitialData in YouTube live chat page (Possibility of Rate Limit/Bot Wall)');
     }
 
     return JSON.parse(match[1]);
@@ -283,7 +292,7 @@ class YouTubeProvider extends BaseProvider {
   start() {
     if (this.isActive) return;
 
-    // Check against normalizedTarget instead of raw un-parsed this.target
+    // Evaluates parsed normalized target accurately
     if (this.normalizedTarget && this.normalizedTarget.startsWith('@')) {
       const channelHandle = this.normalizedTarget.substring(1);
       this.fetchChannelLiveStream(channelHandle)
@@ -292,7 +301,7 @@ class YouTubeProvider extends BaseProvider {
             this.videoId = videoId;
             this.startPolling();
           } else {
-            console.error(`[YouTubeProvider] No active live stream for channel @${channelHandle}`);
+            console.error(`[YouTubeProvider] No active live stream found for channel @${channelHandle}. Verify privacy configurations.`);
           }
         })
         .catch((err) => {
