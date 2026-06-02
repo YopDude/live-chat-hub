@@ -9,14 +9,13 @@ class YouTubeProvider extends BaseProvider {
     super(target, onMessage);
     this.seenIds = new Set();
     this.pollInterval = null;
+    this.videoId = null;
     
-    // Normalize target correctly from the start to catch handles or IDs
+    // Normalize target correctly from the start
     this.normalizedTarget = YouTubeProvider.normalizeTarget(target);
     
     if (this.normalizedTarget && !this.normalizedTarget.startsWith('@')) {
       this.videoId = this.normalizedTarget;
-    } else {
-      this.videoId = null; 
     }
   }
 
@@ -25,13 +24,11 @@ class YouTubeProvider extends BaseProvider {
     const raw = target.trim();
     if (!raw) return null;
     
-    // Try to extract a video ID first
     const videoId = YouTubeProvider.extractVideoIdStatic(raw);
     if (videoId && !videoId.startsWith('@')) {
       return videoId;
     }
     
-    // Try to extract channel handle from URLs or raw channel names
     const channelHandle = YouTubeProvider.extractChannelHandle(raw);
     if (channelHandle) {
       return `@${channelHandle}`;
@@ -94,92 +91,71 @@ class YouTubeProvider extends BaseProvider {
   }
 
   /**
-   * Scrapes the channel's /streams tab to structurally isolate the truly live video card.
+   * Fetches the channel's active live stream video ID using a combination of 
+   * the ultra-stable RSS Feed fallback and direct DOM inspection.
    */
   async fetchChannelLiveStream(channelHandle) {
     try {
-      console.log(`[YouTubeProvider] Fetching active stream metadata for channel: ${channelHandle}`);
+      console.log(`[YouTubeProvider] Resolving active live stream for: @${channelHandle}`);
       
-      // Scraping the /streams tab guarantees we get structural layout lists instead of direct watch layout shifts
-      const targetUrl = `https://www.youtube.com/@${channelHandle}/streams`;
-      
-      const response = await axios.get(targetUrl, {
+      // Phase 1: Try reading the channel page frontend with layout-proof lookaheads
+      const channelUrl = `https://www.youtube.com/@${channelHandle}/live`;
+      const response = await axios.get(channelUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
           'Accept-Language': 'en-US,en;q=0.9',
-          'Cache-Control': 'no-cache'
         },
       });
 
       const html = response.data;
-      const match = html.match(/window\["ytInitialData"\]\s*=\s*(\{[\s\S]*?\})\s*;<\/script>/) || 
-                    html.match(/ytInitialData\s*=\s*(\{[\s\S]*?\});/);
 
-      if (!match) {
-        console.warn(`[YouTubeProvider] Failed to extract structural JSON layout data for @${channelHandle}. Triggering backup parsing...`);
-        return this.backupRegexParser(html);
+      // Check canonical link patterns first
+      const canonicalMatch = html.match(/<link\s+rel="canonical"\s+href="https:\/\/www\.youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})"/);
+      if (canonicalMatch && canonicalMatch[1]) {
+        return canonicalMatch[1];
       }
 
-      const ytInitialData = JSON.parse(match[1]);
-      
-      // Traverse down into the active tab contents structurally
-      const activeVideoId = this.scanRenderersForLiveBadge(ytInitialData);
-      if (activeVideoId) {
-        console.log(`[YouTubeProvider] Found live stream video ID: ${activeVideoId}`);
-        return activeVideoId;
+      // Phase 2: RSS Feed parsing fallback (Unbrickable via layout challenges)
+      // We look for the external channel ID channel token inside the layout to query the XML feed
+      const channelIdMatch = html.match(/"channelId"\s*:\s*"([a-zA-Z0-9_-]{24})"/);
+      if (channelIdMatch && channelIdMatch[1]) {
+        const rssUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelIdMatch[1]}`;
+        const rssResponse = await axios.get(rssUrl);
+        const rssFeed = rssResponse.data;
+        
+        // Find the most recent video ID uploaded/streamed in the XML feed stream
+        const videoIdMatches = [...rssFeed.matchAll(/<yt:videoId>([a-zA-Z0-9_-]{11})<\/yt:videoId>/g)];
+        if (videoIdMatches.length > 0) {
+          // Check the top 2 items to see if either are active live streams
+          for (const match of videoIdMatches.slice(0, 2)) {
+            const potentialId = match[1];
+            // Double check if this recent video ID is actually an active live stream chat room
+            const isLive = await this.verifyIsLive(potentialId);
+            if (isLive) return potentialId;
+          }
+        }
       }
 
-      // Check fallback regex just in case extraction was fine but tree structure has mutated slightly
-      return this.backupRegexParser(html);
+      // Final dynamic structural text trace fallback
+      const fallbackMatch = html.match(/"liveStreamRenderer".*?"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/);
+      if (fallbackMatch && fallbackMatch[1]) return fallbackMatch[1];
+
+      return null;
     } catch (err) {
-      console.error(`[YouTubeProvider] Error identifying active stream:`, err.message);
+      console.error(`[YouTubeProvider] Error identifying channel state:`, err.message);
       return null;
     }
   }
 
-  /**
-   * Recursively looks for a videoRenderer containing a live badge inside the data tree.
-   */
-  scanRenderersForLiveBadge(node) {
-    if (!node || typeof node !== 'object') return null;
-
-    if (node.videoRenderer) {
-      const renderer = node.videoRenderer;
-      const badges = renderer.thumbnailOverlays || [];
-      
-      // Look for a structural 'STYLE_TYPE_LIVE' overlay marker inside the video layout card
-      const isLive = JSON.stringify(badges).includes('BADGE_STYLE_TYPE_LIVE') || 
-                     JSON.stringify(renderer.badges).includes('LIVE');
-                     
-      if (isLive && renderer.videoId) {
-        return renderer.videoId;
-      }
+  async verifyIsLive(videoId) {
+    try {
+      const response = await axios.get(`https://www.youtube.com/live_chat?v=${videoId}`, {
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      });
+      return response.data.includes('ytInitialData') && !response.data.includes('isLive":false');
+    } catch {
+      return false;
     }
-
-    if (Array.isArray(node)) {
-      for (const element of node) {
-        const found = this.scanRenderersForLiveBadge(element);
-        if (found) return found;
-      }
-    } else {
-      for (const value of Object.values(node)) {
-        const found = this.scanRenderersForLiveBadge(value);
-        if (found) return found;
-      }
-    }
-    return null;
-  }
-
-  backupRegexParser(html) {
-    // Looks for explicit canonical URLs pointing to watch?v= matching elements inside scripts
-    const canonicalMatch = html.match(/<link\s+rel="canonical"\s+href="https:\/\/www\.youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})"/);
-    if (canonicalMatch && canonicalMatch[1]) return canonicalMatch[1];
-
-    const structuralMatch = html.match(/"videoRenderer":\s*\{\s*"videoId":\s*"([a-zA-Z0-9_-]{11})"[^}]+"style":\s*"BADGE_STYLE_TYPE_LIVE"/);
-    if (structuralMatch && structuralMatch[1]) return structuralMatch[1];
-    
-    return null;
   }
 
   buildChatUrl() {
@@ -199,16 +175,14 @@ class YouTubeProvider extends BaseProvider {
                   html.match(/ytInitialData\s*=\s*(\{[\s\S]*?\});/);
                   
     if (!match) {
-      throw new Error('Unable to locate ytInitialData in YouTube live chat page. Challenge walls or IP restrictions are currently active.');
+      throw new Error('Unable to extract ytInitialData token payload. Rate limit challenge wall active.');
     }
 
     return JSON.parse(match[1]);
   }
 
   findChatActions(node) {
-    if (!node || typeof node !== 'object') {
-      return null;
-    }
+    if (!node || typeof node !== 'object') return null;
 
     if (Array.isArray(node)) {
       if (node.some((item) => item && (item.addChatItemAction || item.replayChatItemAction))) {
@@ -216,18 +190,14 @@ class YouTubeProvider extends BaseProvider {
       }
       for (const item of node) {
         const found = this.findChatActions(item);
-        if (found) {
-          return found;
-        }
+        if (found) return found;
       }
       return null;
     }
 
     for (const value of Object.values(node)) {
       const found = this.findChatActions(value);
-      if (found) {
-        return found;
-      }
+      if (found) return found;
     }
     return null;
   }
@@ -293,9 +263,7 @@ class YouTubeProvider extends BaseProvider {
   }
 
   async pollLiveChat() {
-    if (!this.videoId) {
-      throw new Error('Invalid YouTube target URL or missing video ID');
-    }
+    if (!this.videoId) return;
 
     try {
       const initialData = await this.fetchInitialData();
@@ -315,8 +283,14 @@ class YouTubeProvider extends BaseProvider {
     }
   }
 
+  /**
+   * OVERRIDE: Modified to synchronize seamlessly with BaseProvider state rules instantly
+   */
   start() {
     if (this.isActive) return;
+    
+    // Crucial: Set active status IMMEDIATELY so parent orchestration code maps sync loops correctly
+    super.start(); 
 
     if (this.normalizedTarget && this.normalizedTarget.startsWith('@')) {
       const channelHandle = this.normalizedTarget.substring(1);
@@ -326,11 +300,13 @@ class YouTubeProvider extends BaseProvider {
             this.videoId = videoId;
             this.startPolling();
           } else {
-            console.error(`[YouTubeProvider] No active live stream found for channel @${channelHandle}. Verify channel setup.`);
+            console.error(`[YouTubeProvider] No active live stream found for channel @${channelHandle}.`);
+            this.stop();
           }
         })
         .catch((err) => {
           console.error(`[YouTubeProvider] Error resolving channel live stream:`, err);
+          this.stop();
         });
       return;
     }
@@ -340,15 +316,15 @@ class YouTubeProvider extends BaseProvider {
 
   startPolling() {
     if (!this.videoId) {
-      throw new Error('YouTubeProvider requires a valid YouTube video URL, ID, or channel name');
+      console.error('YouTubeProvider execution failed: video ID not resolved.');
+      this.stop();
+      return;
     }
 
     this.pollInterval = setInterval(() => this.pollLiveChat(), POLL_INTERVAL_MS);
     this.pollLiveChat().catch((err) => {
       console.error('YouTubeProvider initial poll failed:', err.message || err);
     });
-
-    super.start();
   }
 
   stop() {
