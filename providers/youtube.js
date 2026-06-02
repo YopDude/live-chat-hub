@@ -68,13 +68,8 @@ class YouTubeProvider extends BaseProvider {
   static extractChannelHandle(target) {
     try {
       if (target.startsWith('http://') || target.startsWith('https://')) {
-        // 1. Initialize URL framework with standard string to capture structure safely
         const url = new URL(target);
-        
-        // 2. Decode the extracted pathname directly to bypass Node's internal auto-re-encoding behavior
         const decodedPathname = decodeURIComponent(url.pathname);
-        
-        // 3. Match standard alphanumeric or multibyte/Unicode channel names using the /u flag
         const handleMatch = decodedPathname.match(/\/@([a-zA-Z0-9_\-\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\uFF00-\uFFEF]+)/u);
         if (handleMatch) {
           return handleMatch[1];
@@ -82,7 +77,6 @@ class YouTubeProvider extends BaseProvider {
       }
     } catch (err) {}
 
-    // Match raw input handles like "てえんださん" or "@てえんださん"
     try {
       const decodedRaw = decodeURIComponent(target);
       const match = decodedRaw.match(/^@?([a-zA-Z0-9_\-\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\uFF00-\uFFEF]+)$/u);
@@ -96,13 +90,12 @@ class YouTubeProvider extends BaseProvider {
 
   /**
    * Resolves the active live stream video ID using direct HTML parsing.
-   * Encodes Unicode channels safely to match YouTube network routing.
+   * Leverages an explicit verification step to filter out recommendations.
    */
   async fetchChannelLiveStream(channelHandle) {
     try {
-      // Safely transform Japanese text into percent-encoded strings for the network packet
       const safeHandle = encodeURIComponent(channelHandle);
-      console.log(`[YouTubeProvider] Resolving stream for channel: @${channelHandle} (${safeHandle})`);
+      console.log(`[YouTubeProvider] Resolving stream for channel: @${channelHandle}`);
       
       const liveUrl = `https://www.youtube.com/@${safeHandle}/live`;
       const response = await axios.get(liveUrl, {
@@ -114,27 +107,49 @@ class YouTubeProvider extends BaseProvider {
       });
 
       const html = response.data;
+      let discoveredVideoId = null;
 
-      // Method 1: Scan for direct canonical references in the raw HTML string
+      // Method 1: Canonical elements check
       const canonicalMatch = html.match(/<link\s+rel="canonical"\s+href="https:\/\/www\.youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})"/);
       if (canonicalMatch && canonicalMatch[1]) {
-        console.log(`[YouTubeProvider] Found live stream ID via HTML Canonical Match: ${canonicalMatch[1]}`);
-        return canonicalMatch[1];
+        discoveredVideoId = canonicalMatch[1];
       }
 
-      // Method 2: Fallback to scanning for deep structural video configurations in standard scripts
-      const videoConfigMatch = html.match(/"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/);
-      if (videoConfigMatch && videoConfigMatch[1]) {
-        if (html.includes('isLive') || html.includes('LIVE_STREAM_RENDERER') || html.includes('LIVE')) {
-          console.log(`[YouTubeProvider] Found live stream ID via configuration matching: ${videoConfigMatch[1]}`);
-          return videoConfigMatch[1];
+      // Method 2: Target player object config block
+      if (!discoveredVideoId) {
+        const embeddedConfig = html.match(/"videoDetails":\s*\{[^}]*?"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/);
+        if (embeddedConfig && embeddedConfig[1]) {
+          discoveredVideoId = embeddedConfig[1];
         }
       }
 
-      // Method 3: Ultimate structural regex fallback when geoblocks/consent walls are presented
-      const liveEmbedMatch = html.match(/\"liveStreamRenderer.*?\"videoId\":\"([a-zA-Z0-9_-]{11})\"/);
-      if (liveEmbedMatch && liveEmbedMatch[1]) {
-        return liveEmbedMatch[1];
+      // Method 3: Broad match fallback
+      if (!discoveredVideoId) {
+        const generalMatch = html.match(/"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/);
+        if (generalMatch && generalMatch[1]) {
+          discoveredVideoId = generalMatch[1];
+        }
+      }
+
+      // Verification Step: Cross-reference video ownership metadata via Embed API
+      if (discoveredVideoId) {
+        const verifyUrl = `https://www.youtube.com/embed/${discoveredVideoId}`;
+        const verifyResponse = await axios.get(verifyUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+        });
+        
+        const verifyHtml = verifyResponse.data;
+        const isCorrectChannel = 
+          verifyHtml.includes(`@${channelHandle}`) || 
+          verifyHtml.includes(safeHandle) ||
+          verifyHtml.toLowerCase().includes(channelHandle.toLowerCase());
+
+        if (isCorrectChannel) {
+          console.log(`[YouTubeProvider] Verified stream ID for @${channelHandle}: ${discoveredVideoId}`);
+          return discoveredVideoId;
+        } else {
+          console.warn(`[YouTubeProvider] Verification mismatch: Discovered ID ${discoveredVideoId} belongs to recommendations, discarding.`);
+        }
       }
 
       return null;
@@ -298,6 +313,7 @@ class YouTubeProvider extends BaseProvider {
       return;
     }
 
+    this.videoId = this.normalizedTarget;
     this.startPolling();
   }
 
