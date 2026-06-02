@@ -69,61 +69,87 @@ class YouTubeProvider extends BaseProvider {
     try {
       if (target.startsWith('http://') || target.startsWith('https://')) {
         const url = new URL(target);
-        const pathname = url.pathname;
-        const handleMatch = pathname.match(/\/@([a-zA-Z0-9_-]+)/);
+        const decodedPathname = decodeURIComponent(url.pathname);
+        const handleMatch = decodedPathname.match(/\/@([a-zA-Z0-9_\-\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\uFF00-\uFFEF]+)/u);
         if (handleMatch) {
           return handleMatch[1];
         }
       }
     } catch (err) {}
 
-    const match = target.match(/^@?([a-zA-Z0-9_-]+)$/);
-    if (match) {
-      return match[1];
-    }
+    try {
+      const decodedRaw = decodeURIComponent(target);
+      const match = decodedRaw.match(/^@?([a-zA-Z0-9_\-\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\uFF00-\uFFEF]+)$/u);
+      if (match) {
+        return match[1];
+      }
+    } catch (err) {}
+    
     return null;
   }
 
   /**
-   * Resolves the active live stream video ID using a combination of the direct 
-   * /live text search and a structural parsing of the hidden InnerTube JSON payload.
+   * Resolves the active live stream video ID using direct HTML parsing.
+   * Leverages an explicit verification step to filter out recommendations.
    */
   async fetchChannelLiveStream(channelHandle) {
     try {
+      const safeHandle = encodeURIComponent(channelHandle);
       console.log(`[YouTubeProvider] Resolving stream for channel: @${channelHandle}`);
       
-      const liveUrl = `https://www.youtube.com/@${channelHandle}/live`;
+      const liveUrl = `https://www.youtube.com/@${safeHandle}/live`;
       const response = await axios.get(liveUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
           'Cache-Control': 'no-cache'
         }
       });
 
       const html = response.data;
+      let discoveredVideoId = null;
 
-      // Method 1: Scan for direct canonical references in the raw HTML string
+      // Method 1: Canonical elements check
       const canonicalMatch = html.match(/<link\s+rel="canonical"\s+href="https:\/\/www\.youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})"/);
       if (canonicalMatch && canonicalMatch[1]) {
-        console.log(`[YouTubeProvider] Found live stream ID via HTML Canonical Match: ${canonicalMatch[1]}`);
-        return canonicalMatch[1];
+        discoveredVideoId = canonicalMatch[1];
       }
 
-      // Method 2: Fallback to scanning for deep structural video configurations in standard scripts
-      const videoConfigMatch = html.match(/"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/);
-      if (videoConfigMatch && videoConfigMatch[1]) {
-        // Confirm it's truly a live broadcast room
-        if (html.includes('isLive') || html.includes('LIVE_STREAM_RENDERER') || html.includes('LIVE')) {
-          console.log(`[YouTubeProvider] Found live stream ID via configuration matching: ${videoConfigMatch[1]}`);
-          return videoConfigMatch[1];
+      // Method 2: Target player object config block
+      if (!discoveredVideoId) {
+        const embeddedConfig = html.match(/"videoDetails":\s*\{[^}]*?"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/);
+        if (embeddedConfig && embeddedConfig[1]) {
+          discoveredVideoId = embeddedConfig[1];
         }
       }
 
-      // Method 3: Ultimate structural regex fallback when geoblocks/consent walls are presented
-      const liveEmbedMatch = html.match(/\"liveStreamRenderer.*?\"videoId\":\"([a-zA-Z0-9_-]{11})\"/);
-      if (liveEmbedMatch && liveEmbedMatch[1]) {
-        return liveEmbedMatch[1];
+      // Method 3: Broad match fallback
+      if (!discoveredVideoId) {
+        const generalMatch = html.match(/"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/);
+        if (generalMatch && generalMatch[1]) {
+          discoveredVideoId = generalMatch[1];
+        }
+      }
+
+      // Verification Step: Cross-reference video ownership metadata via Embed API
+      if (discoveredVideoId) {
+        const verifyUrl = `https://www.youtube.com/embed/${discoveredVideoId}`;
+        const verifyResponse = await axios.get(verifyUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+        });
+        
+        const verifyHtml = verifyResponse.data;
+        const isCorrectChannel = 
+          verifyHtml.includes(`@${channelHandle}`) || 
+          verifyHtml.includes(safeHandle) ||
+          verifyHtml.toLowerCase().includes(channelHandle.toLowerCase());
+
+        if (isCorrectChannel) {
+          console.log(`[YouTubeProvider] Verified stream ID for @${channelHandle}: ${discoveredVideoId}`);
+          return discoveredVideoId;
+        } else {
+          console.warn(`[YouTubeProvider] Verification mismatch: Discovered ID ${discoveredVideoId} belongs to recommendations, discarding.`);
+        }
       }
 
       return null;
@@ -137,16 +163,12 @@ class YouTubeProvider extends BaseProvider {
     return `https://www.youtube.com/live_chat?v=${this.videoId}`;
   }
 
-  /**
-   * Fetches chat engine payloads. If standard layout rendering drops due to host blocks,
-   * it falls back to an un-challengable standalone mobile interface parsing context.
-   */
   async fetchInitialData() {
     try {
       const response = await axios.get(this.buildChatUrl(), {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
-          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
         },
       });
 
@@ -161,7 +183,6 @@ class YouTubeProvider extends BaseProvider {
 
       return JSON.parse(match[1]);
     } catch (err) {
-      // Emergency dynamic payload recovery loop
       throw new Error(`YouTube chat data compilation failed: ${err.message}`);
     }
   }
@@ -292,6 +313,7 @@ class YouTubeProvider extends BaseProvider {
       return;
     }
 
+    this.videoId = this.normalizedTarget;
     this.startPolling();
   }
 
