@@ -346,4 +346,34 @@ window.removeSource = (id) => {
   }
 };
 
+document.addEventListener('DOMContentLoaded', () => {
+    const themeToggleBtn = document.getElementById('theme-toggle-btn');
+    const body = document.body;
+
+    // Check localStorage or device preferences for default theme preference
+    const savedTheme = localStorage.getItem('theme');
+    
+    if (savedTheme === 'light') {
+        body.classList.add('light-mode');
+        themeToggleBtn.textContent = '🌙 Dark Mode';
+    } else {
+        // Default is dark mode, no classes needed
+        body.classList.remove('light-mode');
+        themeToggleBtn.textContent = '☀️ Light Mode';
+    }
+
+    // Toggle click event
+    themeToggleBtn.addEventListener('click', () => {
+        body.classList.toggle('light-mode');
+        
+        if (body.classList.contains('light-mode')) {
+            themeToggleBtn.textContent = '🌙 Dark Mode';
+            localStorage.setItem('theme', 'light');
+        } else {
+            themeToggleBtn.textContent = '☀️ Light Mode';
+            localStorage.setItem('theme', 'dark');
+        }
+    });
+});
+
 init();
