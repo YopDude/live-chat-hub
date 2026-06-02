@@ -26,6 +26,7 @@ class YouTubeProvider extends BaseProvider {
     // Try to extract channel handle from URLs or raw channel names
     const channelHandle = YouTubeProvider.extractChannelHandle(raw);
     if (channelHandle) {
+      // Return as channel handle marker so we can fetch live stream later
       return `@${channelHandle}`;
     }
     
@@ -63,12 +64,14 @@ class YouTubeProvider extends BaseProvider {
     try {
       const url = new URL(target);
       const pathname = url.pathname;
-      const handleMatch = pathname.match(/\/@([^\/?#]+)/u);
+      // Match @ChannelHandle
+      const handleMatch = pathname.match(/\/@([a-zA-Z0-9_-]+)/);
       if (handleMatch) {
         return handleMatch[1];
       }
     } catch (err) {
-      const match = target.match(/^@?([^\/\s]+)$/u);
+      // Handle raw channel names like "ThaRixer" or "@ThaRixer"
+      const match = target.match(/^@?([a-zA-Z0-9_-]+)$/);
       if (match) {
         return match[1];
       }
@@ -76,93 +79,42 @@ class YouTubeProvider extends BaseProvider {
     return null;
   }
 
-async fetchChannelLiveStream(channelHandle) {
-  try {
-    console.log(
-      `[YouTubeProvider] Dynamic lookup tracking active for channel: @${channelHandle}`
-    );
+  async fetchChannelLiveStream(channelHandle) {
+    try {
+      console.log(`[YouTubeProvider] Fetching live stream for channel: ${channelHandle}`);
+      const channelUrl = `https://www.youtube.com/@${channelHandle}/live`;
+      const response = await axios.get(channelUrl, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36',
+        },
+      });
 
-    const channelUrl = `https://www.youtube.com/@${channelHandle}/live`;
+      // Extract video ID from the response
+      const idMatch = response.data.match(/(?:"videoId"|"VIDEO_ID")\s*:\s*"([a-zA-Z0-9_-]{11})"/);
+      if (idMatch && idMatch[1]) {
+        console.log(`[YouTubeProvider] Found live stream video ID: ${idMatch[1]}`);
+        return idMatch[1];
+      }
 
-    const response = await axios.get(channelUrl, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9',
-
-        // Consent-wall bypass
-        Cookie: 'CONSENT=YES+cb; SOCS=CAI',
-
-        // Browser-like headers
-        'Sec-Ch-Ua':
-          '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-        'Sec-Ch-Ua-Mobile': '?0',
-        'Sec-Ch-Ua-Platform': '"Windows"',
-
-        Referer: 'https://www.youtube.com/',
-        Origin: 'https://www.youtube.com',
-      },
-
-      maxRedirects: 10,
-    });
-
-    // Detect common challenge pages
-    if (
-      response.data.includes('consent.youtube.com') ||
-      response.data.includes('captcha') ||
-      response.data.includes('g-recaptcha') ||
-      response.data.includes('www.google.com/sorry') ||
-      response.data.includes('Our systems have detected unusual traffic')
-    ) {
-      console.warn(
-        `[YouTubeProvider] Warning: YouTube issued a bot challenge or consent wall for @${channelHandle}.`
-      );
+      // Fallback: search for the generic object key with videoId
+      const fallbackMatch = response.data.match(/"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/);
+      if (fallbackMatch && fallbackMatch[1]) {
+        console.log(`[YouTubeProvider] Found live stream video ID via fallback: ${fallbackMatch[1]}`);
+        return fallbackMatch[1];
+      }
+      
+      console.warn(`[YouTubeProvider] No live stream found for channel: ${channelHandle}`);
+      return null;
+    } catch (err) {
+      console.error(`[YouTubeProvider] Error fetching channel stream:`, err.message);
       return null;
     }
-
-    // Prefer the active player's videoDetails block
-    const playerMatch = response.data.match(
-      /"videoDetails"\s*:\s*\{[^}]*"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/
-    );
-
-    const videoId = playerMatch ? playerMatch[1] : null;
-
-    if (!videoId) {
-      console.log(
-        `[YouTubeProvider] No active video ID found for @${channelHandle}`
-      );
-      return null;
-    }
-
-    const isLiveActive =
-      response.data.includes('"isLive":true') ||
-      response.data.includes('"isLiveStream":true') ||
-      response.data.includes('"style":"LIVE"') ||
-      response.data.includes('"badgeStyle":"BADGE_STYLE_TYPE_LIVE_NOW"');
-
-    if (!isLiveActive) {
-      console.log(
-        `[YouTubeProvider] Channel @${channelHandle} is not currently live`
-      );
-      return null;
-    }
-
-    console.log(
-      `[YouTubeProvider] Successfully isolated verified active live stream ID: ${videoId}`
-    );
-
-    return videoId;
-  } catch (err) {
-    console.error(
-      `[YouTubeProvider] Error resolving dynamic channel stream:`,
-      err.response?.status || err.message
-    );
-
-    return null;
   }
-}
+
 
   extractVideoId(target) {
+    // First try to extract a video ID
     try {
       const url = new URL(target);
       if (url.searchParams.has('v')) {
@@ -180,15 +132,16 @@ async fetchChannelLiveStream(channelHandle) {
       }
     }
 
+    // Try to extract channel handle
     try {
       const url = new URL(target);
       const pathname = url.pathname;
-      const handleMatch = pathname.match(/\/@([^\/?#]+)/u);
+      const handleMatch = pathname.match(/\/@([a-zA-Z0-9_-]+)/);
       if (handleMatch) {
         return `@${handleMatch[1]}`;
       }
     } catch (err) {
-      const match = target.match(/^@?([^\/\s]+)$/u);
+      const match = target.match(/^@?([a-zA-Z0-9_-]+)$/);
       if (match) {
         return `@${match[1]}`;
       }
@@ -202,19 +155,12 @@ async fetchChannelLiveStream(channelHandle) {
   }
 
   async fetchInitialData() {
-    const response = await axios.get(channelUrl, {
-            headers: {
-              'User-Agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              'Accept-Language': 'en-US,en;q=0.9',
-              // Inject pre-accepted consent cookies to bypass the redirect wall
-              'Cookie': 'CONSENT=YES+cb; SOCS=CAI', 
-              // Adding these helps bypass deeper bot-checks
-              'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-              'Sec-Ch-Ua-Mobile': '?0',
-              'Sec-Ch-Ua-Platform': '"Windows"'
-            },
-          });
+    const response = await axios.get(this.buildChatUrl(), {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36',
+      },
+    });
 
     const html = response.data;
     const match = html.match(/window\["ytInitialData"\]\s*=\s*(\{[\s\S]*?\})\s*;<\/script>/);
@@ -231,7 +177,7 @@ async fetchChannelLiveStream(channelHandle) {
     }
 
     if (Array.isArray(node)) {
-      if (node.some((item) => item && item.addChatItemAction)) {
+      if (node.some((item) => item && (item.addChatItemAction || item.replayChatItemAction))) {
         return node;
       }
       for (const item of node) {
@@ -253,18 +199,28 @@ async fetchChannelLiveStream(channelHandle) {
   }
 
   normalizeText(runs) {
-    if (!runs) return '';
-    if (typeof runs === 'string') return runs;
+    if (!runs) {
+      return '';
+    }
+    if (typeof runs === 'string') {
+      return runs;
+    }
     if (Array.isArray(runs)) {
       return runs.map((run) => run?.text || '').join('');
     }
-    if (runs.simpleText) return runs.simpleText;
+    if (runs.simpleText) {
+      return runs.simpleText;
+    }
     return '';
   }
 
   normalizeAuthor(author) {
-    if (!author) return 'YouTube Viewer';
-    if (author.simpleText) return author.simpleText;
+    if (!author) {
+      return 'YouTube Viewer';
+    }
+    if (author.simpleText) {
+      return author.simpleText;
+    }
     if (Array.isArray(author.runs)) {
       return author.runs.map((run) => run.text || '').join('');
     }
@@ -272,9 +228,11 @@ async fetchChannelLiveStream(channelHandle) {
   }
 
   extractActionPayload(action) {
-    const chatItem = action.addChatItemAction;
+    const chatItem = action.addChatItemAction || action.replayChatItemAction;
     const item = chatItem?.item;
-    if (!item) return null;
+    if (!item) {
+      return null;
+    }
 
     const textRenderer =
       item.liveChatTextMessageRenderer ||
@@ -283,7 +241,9 @@ async fetchChannelLiveStream(channelHandle) {
       item.liveChatMembershipItemRenderer ||
       item.liveChatStandardMessageRenderer;
 
-    if (!textRenderer) return null;
+    if (!textRenderer) {
+      return null;
+    }
 
     const messageText =
       this.normalizeText(textRenderer.message?.runs || textRenderer.message?.simpleText) ||
@@ -299,7 +259,9 @@ async fetchChannelLiveStream(channelHandle) {
       item.liveChatMembershipItemRenderer,
     );
 
-    if (!messageText || !username) return null;
+    if (!messageText || !username) {
+      return null;
+    }
 
     return {
       id,
@@ -313,8 +275,8 @@ async fetchChannelLiveStream(channelHandle) {
   }
 
   async pollLiveChat() {
-    if (!this.videoId || this.videoId.startsWith('@')) {
-      return;
+    if (!this.videoId) {
+      throw new Error('Invalid YouTube target URL or missing video ID');
     }
 
     try {
@@ -323,7 +285,15 @@ async fetchChannelLiveStream(channelHandle) {
 
       for (const action of actions) {
         const payload = this.extractActionPayload(action);
-        if (!payload || !payload.id || this.seenIds.has(payload.id)) {
+        if (!payload) {
+          continue;
+        }
+
+        if (!payload.id) {
+          continue;
+        }
+
+        if (this.seenIds.has(payload.id)) {
           continue;
         }
 
@@ -336,30 +306,25 @@ async fetchChannelLiveStream(channelHandle) {
   }
 
   start() {
-    if (this.isActive) return;
+    if (this.isActive) {
+      return;
+    }
 
-    if (this.videoId && this.videoId.startsWith('@')) {
-      const channelHandle = this.videoId.substring(1);
-      
-      // FIX: Upgraded to a continuous background polling loop to provide a true 
-      // "set-it-and-forget-it" UX if the channel starts up while offline.
-      const resolveAndConnect = async () => {
-        const resolvedVideoId = await this.fetchChannelLiveStream(channelHandle);
-        if (resolvedVideoId) {
-          this.videoId = resolvedVideoId;
-          this.startPolling();
-        } else {
-          console.log(`[YouTubeProvider] @${channelHandle} is currently offline. Re-checking stream state in 30 seconds...`);
-          this.pollInterval = setTimeout(resolveAndConnect, 30000);
-        }
-      };
-
-      resolveAndConnect().catch((err) => {
-        console.error(`[YouTubeProvider] Handle tracking thread encountered a fault:`, err);
-      });
-      
-      this.isActive = true;
-      super.start();
+    // If target starts with @, it's a channel handle—fetch the live stream video ID
+    if (this.target.startsWith('@')) {
+      const channelHandle = this.target.substring(1);
+      this.fetchChannelLiveStream(channelHandle)
+        .then((videoId) => {
+          if (videoId) {
+            this.videoId = videoId;
+            this.startPolling();
+          } else {
+            console.error(`[YouTubeProvider] No active live stream for channel @${channelHandle}`);
+          }
+        })
+        .catch((err) => {
+          console.error(`[YouTubeProvider] Error resolving channel live stream:`, err);
+        });
       return;
     }
 
@@ -367,13 +332,8 @@ async fetchChannelLiveStream(channelHandle) {
   }
 
   startPolling() {
-    if (!this.videoId || this.videoId.startsWith('@')) {
-      throw new Error('YouTubeProvider requires a resolved, valid 11-character video ID before polling.');
-    }
-
-    // Clear previous check-timers if switching gears to active polling
-    if (this.pollInterval) {
-      clearTimeout(this.pollInterval);
+    if (!this.videoId) {
+      throw new Error('YouTubeProvider requires a valid YouTube video URL, ID, or channel name');
     }
 
     this.pollInterval = setInterval(() => this.pollLiveChat(), POLL_INTERVAL_MS);
@@ -381,14 +341,11 @@ async fetchChannelLiveStream(channelHandle) {
       console.error('YouTubeProvider initial poll failed:', err.message || err);
     });
 
-    if (!this.isActive) {
-      super.start();
-    }
+    super.start();
   }
 
   stop() {
     if (this.pollInterval) {
-      clearTimeout(this.pollInterval);
       clearInterval(this.pollInterval);
       this.pollInterval = null;
     }
