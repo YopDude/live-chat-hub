@@ -1,4 +1,84 @@
 const socket = io('https://live-chat-hub.onrender.com'); // Changes automatically based on deployment URL
+
+// --- DYNAMIC PROFILE CONFIGURATIONS ---
+const PROFILES = {
+  shiho: {
+    globalMuted: true, // Globally mutes all alert sounds
+    sources: [
+      { platform: 'youtube', target: 'https://www.youtube.com/@kakage_truth' },
+      { platform: 'twitch',  target: 'brtamagawa' }
+    ]
+  },
+  // You can easily scale this later:
+  // admin: {
+  //   globalMuted: false,
+  //   sources: [{ platform: 'twitch', target: 'ninja' }]
+  // }
+};
+
+// --------------------------------------------------
+// PROFILE ACCESS CONTROL
+// --------------------------------------------------
+
+const SECRET_HASH =
+  '3c1bf06375a231a024e02ff86402e14dbfc91298a86178e197ceb4ae3630fef0';
+
+const urlParams = new URLSearchParams(window.location.search);
+const suppliedProfile = urlParams.get('p')?.toLowerCase() || '';
+
+// Lightweight client-side hash check.
+// This is only intended to keep casual users out.
+async function sha256(text) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(text);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+let ACTIVE_PROFILE = null;
+let streamSources = [];
+
+async function initializeProfile() {
+  const suppliedHash = await sha256(suppliedProfile);
+
+  if (suppliedHash !== SECRET_HASH) {
+    document.body.innerHTML = `
+      <div style="
+        display:flex;
+        justify-content:center;
+        align-items:center;
+        height:100vh;
+        font-size:2rem;
+        font-family:sans-serif;
+      ">
+        404 Not Found
+      </div>
+    `;
+    return false;
+  }
+
+  ACTIVE_PROFILE = PROFILES.shiho;
+
+  console.log('[PROFILE ACTIVATED] Loading profile: shiho');
+
+  streamSources = ACTIVE_PROFILE.sources.map((src, index) => ({
+    id: `profile-preset-${index}`,
+    platform: src.platform,
+    target: src.target,
+    isPaused: false,
+    isMuted: ACTIVE_PROFILE.globalMuted
+  }));
+
+  return true;
+}
+
+const chatTimeline = document.getElementById('chat-timeline');
+const statusBanner = document.getElementById('status-banner');
+
+const socket = io('https://live-chat-hub.onrender.com'); // Changes automatically based on deployment URL
 let streamSources = JSON.parse(localStorage.getItem('chatSources')) || [];
 const chatTimeline = document.getElementById('chat-timeline');
 const statusBanner = document.getElementById('status-banner');
@@ -58,13 +138,11 @@ socket.on('chat-message', (data) => {
   const currentConfig = streamSources.find((s) => s.id === data.sourceId);
   if (!currentConfig || currentConfig.isPaused) return;
 
-  // Play notification sound if not muted
-  if (!currentConfig.isMuted) {
+  // Play sound if NOT in a profile mode that mutes globally, AND the individual stream isn't muted
+  const isGloballyMuted = ACTIVE_PROFILE && ACTIVE_PROFILE.globalMuted;
+  if (!isGloballyMuted && !currentConfig.isMuted) {
     playNotificationSound();
   }
-
-  // System alerts remain visually highlighted in chat.
-  // Text-to-speech has been removed.
 
   renderMessageToTimeline(data);
 });
@@ -376,4 +454,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-init();
+initializeProfile().then((allowed) => {
+  if (allowed) {
+    init();
+  }
+});
