@@ -29,7 +29,6 @@ class FacebookProvider extends BaseProvider {
       
       this.browser = await puppeteer.launch({
         headless: "new",
-        executablePath: 'chrome',
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
