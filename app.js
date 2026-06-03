@@ -15,9 +15,9 @@ const PROFILES = {
   shiho: {
     globalMuted: true, // Globally mutes all alert sounds
     sources: [
-      { platform: 'youtube', target: 'https://www.youtube.com/@shiho-tennyoza' },
-      { platform: 'twitch',  target: 'https://www.twitch.tv/shihoyabuki' },
-      { platform: 'tiktok',  target: 'https://www.tiktok.com/@shihoyabuki' }
+      { platform: 'youtube', target: '@shiho-tennyoza' },
+      { platform: 'twitch',  target: 'shihoyabuki' },
+      { platform: 'tiktok',  target: '@shihoyabuki' }
     ]
   }
 };
