@@ -1,5 +1,6 @@
 const express = require('express');
 const http = require('http');
+const cors = require('cors'); // Clean middleware abstraction handling Express APIs
 const { Server } = require('socket.io');
 
 const TwitchProvider = require('./providers/twitch');
@@ -9,6 +10,13 @@ const FacebookProvider = require('./providers/facebook');
 const InstagramProvider = require('./providers/instagram');
 
 const app = express();
+
+// Enable Global CORS for all Express HTTP Router targets
+app.use(cors({
+  origin: ['https://yopdude.github.io', 'https://live-chat-hub.onrender.com', '*'],
+  methods: ['GET', 'POST']
+}));
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
@@ -26,7 +34,6 @@ const providerClasses = {
 };
 
 // --- GLOBAL ROLLING HISTORY BUFFER ---
-// Maintains a central cache of the last 50 chats received across all active users/channels
 const CHAT_HISTORY_BUFFER = [];
 
 function archiveMessage(payload) {
@@ -36,7 +43,7 @@ function archiveMessage(payload) {
   }
 }
 
-// REST Endpoint allowing the iPad to pull down recent historical content upon waking up
+// Fixed endpoint now completely open to your frontend origin calls via cors middleware
 app.get('/api/history', (req, res) => {
   res.json({ success: true, history: CHAT_HISTORY_BUFFER });
 });
@@ -85,7 +92,6 @@ io.on('connection', (socket) => {
     stopSource(id);
 
     const provider = new ProviderClass(normalizedTarget, (message) => {
-      // Build full outbox message object
       const fullMessagePayload = {
         sourceId: id,
         platform,
@@ -93,10 +99,7 @@ io.on('connection', (socket) => {
         ...message,
       };
 
-      // Store in our history log so it can be requested via /api/history later
       archiveMessage(fullMessagePayload);
-
-      // Distribute immediately to connected streaming frontends
       socket.emit('chat-message', fullMessagePayload);
     });
 

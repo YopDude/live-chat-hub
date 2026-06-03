@@ -1,7 +1,6 @@
 let ACTIVE_PROFILE = null;
 let streamSources = JSON.parse(localStorage.getItem('chatSources')) || [];
 let socket; 
-let wakeLock = null; 
 
 // Track all rendered unique message IDs globally on the page to prevent duplication on catchup
 const renderedMessageIds = new Set();
@@ -69,17 +68,18 @@ async function initializeProfile() {
   ACTIVE_PROFILE = PROFILES[matchedProfileKey];
   console.log(`[PROFILE ACTIVATED] Loading profile: ${matchedProfileKey}`);
 
-  // Establish connection with built-in robust reconnection attempts configured
+  // Establish connection with optimized reconnect engines and forced native websockets preference
   socket = io('https://live-chat-hub.onrender.com', {
+    transports: ['websocket', 'polling'], // Prioritize stable websocket paths
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
-    reconnectionDelayMax: 5000,
-    timeout: 20000
+    reconnectionDelayMax: 4000,
+    timeout: 10000
   }); 
 
   setupSocketListeners();
-  setupMobileKeepAlive(); // Initialize iPad wake lock and background event listeners
+  setupNetworkRecoveryHooks(); // Activates internet recovery catch-up triggers
 
   if (streamSources.length === 0) {
     streamSources = ACTIVE_PROFILE.sources.map((src, index) => ({
@@ -101,7 +101,6 @@ function setupSocketListeners() {
     const currentConfig = streamSources.find((s) => s.id === data.sourceId);
     if (!currentConfig || currentConfig.isPaused) return;
 
-    // Cache real-time message ID to prevent duplicates later
     if (data && data.id) {
       renderedMessageIds.add(data.id);
     }
@@ -121,79 +120,76 @@ function setupSocketListeners() {
 
   socket.on('disconnect', (reason) => {
     console.log('Disconnected from server:', reason);
-    if (reason === 'io server disconnect') {
-      showStatus('Connection dropped by server. Retrying...', 'error');
+    showStatus('Connection lost. Reconnecting...', 'error');
+    if (reason === 'io server disconnect' || reason === 'transport close') {
       socket.connect();
-    } else {
-      showStatus('Connection lost. Reconnecting...', 'error');
     }
   });
 
   socket.on('connect_error', (err) => {
     console.error('Connection error:', err);
-    showStatus('Reconnecting to live stream...', 'info');
+    showStatus('Searching for live stream connectivity...', 'info');
   });
 }
 
-// --- IPAD KEEPALIVE & AUTOMATED HISTORICAL BACKFILL ENGINE ---
-function setupMobileKeepAlive() {
-  async function requestWakeLock() {
-    if ('wakeLock' in navigator) {
-      try {
-        wakeLock = await navigator.wakeLock.request('screen');
-        console.log('[Wake Lock] Screen kept active successfully.');
-      } catch (err) {
-        console.warn(`[Wake Lock] Activation skipped: ${err.message}`);
+// --- NETWORK RECOVERY AND HISTORICAL LOG CATCH-UP ---
+function setupNetworkRecoveryHooks() {
+  // Central runtime recovery logic
+  async function executeRestorationSequence() {
+    console.log('[Recovery] Network/Tab focus restored. Verifying system state...');
+
+    // 1. Instantly reset connection if socket state became dead or hung
+    if (!socket || !socket.connected) {
+      console.log('[Recovery] Inactive socket detected. Overriding internal state...');
+      showStatus('Reconnecting to server data streams...', 'info');
+      socket.disconnect().connect(); 
+    }
+
+    // 2. Clear any stale polling loops and run HTTP backfill catch-up request
+    try {
+      const response = await fetch('https://live-chat-hub.onrender.com/api/history');
+      if (!response.ok) throw new Error(`HTTP status error: ${response.status}`);
+      
+      const data = await response.json();
+
+      if (data && data.success && Array.isArray(data.history)) {
+        let backfilledCount = 0;
+
+        data.history.forEach((msg) => {
+          const currentConfig = streamSources.find((s) => s.id === msg.sourceId);
+          if (!currentConfig || currentConfig.isPaused) return;
+
+          // Deduplicate entries already visible on browser timeline layout
+          if (renderedMessageIds.has(msg.id)) return;
+
+          renderedMessageIds.add(msg.id);
+          renderMessageToTimeline(msg);
+          backfilledCount++;
+        });
+
+        if (backfilledCount > 0) {
+          showStatus(`Recovered ${backfilledCount} missed chats ✓`, 'info');
+        }
       }
+    } catch (err) {
+      console.error('[History Sync] Catch-up log sync request failed:', err);
     }
   }
 
-  // Initial execution block
-  requestWakeLock();
-
-  // Watch for the iPad waking up or navigating back onto the tab layout
-  document.addEventListener('visibilitychange', async () => {
+  // Hook visibility triggers (tab minimized/maximized, device wake-up from sleep)
+  document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      console.log('[Visibility] iPad woke up. Initiating data restoration routine...');
-      
-      requestWakeLock(); // Renew screen wake-lock session
+      executeRestorationSequence();
+    }
+  });
 
-      // 1. Force the active socket out of any latent/frozen state
-      if (!socket || !socket.connected) {
-        console.log('[Visibility] Stale socket detected. Forcing reconnection...');
-        showStatus('Restoring socket connection...', 'info');
-        socket.connect();
-      }
-
-      // 2. Fetch the latest 50 messages from the backend history buffer
-      try {
-        const response = await fetch('https://live-chat-hub.onrender.com/api/history');
-        const data = await response.json();
-
-        if (data && data.success && Array.isArray(data.history)) {
-          let backfilledCount = 0;
-
-          data.history.forEach((msg) => {
-            // Verify if source is currently added and unpaused
-            const currentConfig = streamSources.find((s) => s.id === msg.sourceId);
-            if (!currentConfig || currentConfig.isPaused) return;
-
-            // Skip rendering if this message is already on the iPad display
-            if (renderedMessageIds.has(msg.id)) return;
-
-            // Register and render the missing item
-            renderedMessageIds.add(msg.id);
-            renderMessageToTimeline(msg);
-            backfilledCount++;
-          });
-
-          if (backfilledCount > 0) {
-            showStatus(`Successfully backfilled ${backfilledCount} missed chats ✓`, 'info');
-          }
-        }
-      } catch (err) {
-        console.error('[History Sync] Catch-up log sync request failed:', err);
-      }
+  // Hook hardware interface changes (WiFi connection toggles)
+  window.addEventListener('online', executeRestorationSequence);
+  
+  // Alternative safe page restoration handling (Safari background freezing safeguards)
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) {
+      executeRestorationSequence();
     }
   });
 }
