@@ -1,15 +1,3 @@
-// --- GLOBAL INITIALIZATIONS & DOM ELEMENTS ---
-const socket = io('https://live-chat-hub.onrender.com'); // Changes automatically based on deployment URL
-
-const chatTimeline = document.getElementById('chat-timeline');
-const statusBanner = document.getElementById('status-banner');
-const sourcePanel = document.getElementById('source-manager-panel');
-const managerToggleBtn = document.getElementById('manager-toggle-btn');
-const closePanelBtn = document.getElementById('close-panel-btn');
-
-let streamSources = JSON.parse(localStorage.getItem('chatSources')) || [];
-let ACTIVE_PROFILE = null;
-
 // --- DYNAMIC PROFILE CONFIGURATIONS ---
 const PROFILES = {
   shiho: {
@@ -19,18 +7,30 @@ const PROFILES = {
       { platform: 'twitch',  target: 'shihoyabuki' },
       { platform: 'tiktok',  target: '@shihoyabuki' }
     ]
+  },
+  // 1. ADD YOUR TESTER CONFIGURATION HERE
+  tester: {
+    globalMuted: false, // Keep sound on so you can test audio notifications!
+    sources: [
+      // Put large, constantly active channels here so you always have live chat data to test with
+      { platform: 'twitch',  target: 'tharixer' },
+      { platform: 'twitch',  target: 'gumi772' }
+    ]
   }
 };
 
 // --------------------------------------------------
 // PROFILE ACCESS CONTROL
 // --------------------------------------------------
-const SECRET_HASH = '3c1bf06375a231a024e02ff86402e14dbfc91298a86178e197ceb4ae3630fef0';
+// 2. DEFINE HASHES FOR BOTH VALID PROFILE KEYS
+const PROFILE_HASHES = {
+  '3c1bf06375a231a024e02ff86402e14dbfc91298a86178e197ceb4ae3630fef0': 'shiho',
+  '9bba5c53a0545e0c801155b4201a9a1305ad22ed9344c5505e26987483329054': 'tester'
+};
 
 const urlParams = new URLSearchParams(window.location.search);
 const suppliedProfile = urlParams.get('p')?.toLowerCase() || '';
 
-// Lightweight client-side hash check for casual users
 async function sha256(text) {
   const encoder = new TextEncoder();
   const data = encoder.encode(text);
@@ -44,7 +44,10 @@ async function sha256(text) {
 async function initializeProfile() {
   const suppliedHash = await sha256(suppliedProfile);
 
-  if (suppliedHash !== SECRET_HASH) {
+  // 3. CHECK IF THE SUPPLIED HASH MATCHES ANY VALID PROFILE
+  const matchedProfileKey = PROFILE_HASHES[suppliedHash];
+
+  if (!matchedProfileKey) {
     document.body.innerHTML = `
       <div style="
         display:flex;
@@ -62,8 +65,9 @@ async function initializeProfile() {
     return false;
   }
 
-  ACTIVE_PROFILE = PROFILES.shiho;
-  console.log('[PROFILE ACTIVATED] Loading profile: shiho');
+  // 4. ASSIGN THE DYNAMIC MATCHED PROFILE
+  ACTIVE_PROFILE = PROFILES[matchedProfileKey];
+  console.log(`[PROFILE ACTIVATED] Loading profile: ${matchedProfileKey}`);
 
   // Fallback to presets ONLY if the user hasn't saved custom sources yet
   if (streamSources.length === 0) {
