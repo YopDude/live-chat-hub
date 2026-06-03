@@ -429,17 +429,47 @@ function renderMessageToTimeline(msg) {
     return;
   }
   
-  if (msg.platform === 'youtube') {
+if (msg.platform === 'youtube') {
     let messageHtml = escapeHtml(msg.message);
-    
-    if (msg.emotes && Array.isArray(msg.emotes)) {
-      const sortedEmotes = [...msg.emotes].sort((a, b) => b.text.length - a.text.length);
-      
-      sortedEmotes.forEach(emote => {
-        const escapedShortcode = escapeHtml(emote.text);
-        const emoteHtml = `<img src="${emote.url}" alt="${escapedShortcode}" class="youtube-emote" title="${escapedShortcode}" style="height: 24px; vertical-align: middle; display: inline-block; margin: 0 2px;" loading="lazy">`;
-        messageHtml = messageHtml.split(escapedShortcode).join(emoteHtml);
-      });
+
+    if (msg.emotes && Array.isArray(msg.emotes) && msg.emotes.length > 0) {
+
+        const uniqueEmotes = new Map();
+
+        for (const emote of msg.emotes) {
+            if (
+                emote &&
+                typeof emote.text === 'string' &&
+                emote.text.length > 0 &&
+                typeof emote.url === 'string'
+            ) {
+                uniqueEmotes.set(emote.text, emote.url);
+            }
+        }
+
+        const sortedCodes = [...uniqueEmotes.keys()]
+            .sort((a, b) => b.length - a.length);
+
+        for (const code of sortedCodes) {
+
+            const escapedCodeForRegex =
+                code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+            const regex = new RegExp(
+                escapeHtml(escapedCodeForRegex),
+                'g'
+            );
+
+            const emoteHtml =
+                `<img src="${uniqueEmotes.get(code)}"` +
+                ` alt="${escapeHtml(code)}"` +
+                ` class="youtube-emote"` +
+                ` title="${escapeHtml(code)}"` +
+                ` style="height:24px;vertical-align:middle;display:inline-block;margin:0 2px;"` +
+                ` loading="lazy">`;
+
+            messageHtml = messageHtml.replace(regex, emoteHtml);
+        }
     }
 
     item.innerHTML = `
@@ -453,10 +483,11 @@ function renderMessageToTimeline(msg) {
         <div class="chat-text">${messageHtml}</div>
       </div>
     `;
+
     chatTimeline.appendChild(item);
     chatTimeline.scrollTop = chatTimeline.scrollHeight;
     return;
-  }
+}
   
   item.innerHTML = `
     <img src="${iconSrc}" class="platform-icon" alt="${msg.platform}">
