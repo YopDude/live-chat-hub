@@ -56,10 +56,11 @@ class FacebookProvider extends BaseProvider {
       
       this.browser = await puppeteer.launch({
         headless: "new",
+        executablePath: '/usr/bin/google-chrome', // Forces Render to use its built-in browser
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
-          '--disable-notifications' // Ensure popup notifications do not break layout geometry
+          '--disable-notifications'
         ]
       });
 

@@ -2,11 +2,10 @@
   "name": "live-chat-hub",
   "version": "1.0.0",
   "main": "index.js",
-  "scripts": {
-    "start": "node server.js",
-    "build": "npm install && (test -d /opt/render/.cache/puppeteer/chrome && echo 'Chrome cached' || npx puppeteer browsers install chrome)",
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+"scripts": {
+  "start": "node server.js",
+  "build": "npm install"
+},
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -14,7 +13,7 @@
   "dependencies": {
     "axios": "^1.16.1",
     "express": "^5.2.1",
-    "puppeteer": "^24.43.1",
+    "puppeteer-core": "^24.43.1",
     "socket.io": "^4.8.3",
     "tiktok-live-connector": "^2.1.1-beta1",
     "tmi.js": "^1.8.5"
