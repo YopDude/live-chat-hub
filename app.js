@@ -105,6 +105,9 @@ function setupSocketListeners() {
       renderedMessageIds.add(data.id);
     }
 
+    // Keep iPad awake for 5 minutes (300,000 ms) upon receiving a valid chat message
+    pokeWakeLock(300000);
+
     const isGloballyMuted = ACTIVE_PROFILE && ACTIVE_PROFILE.globalMuted;
     if (!isGloballyMuted && !currentConfig.isMuted) {
       playNotificationSound();
@@ -180,6 +183,8 @@ function setupNetworkRecoveryHooks() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       executeRestorationSequence();
+      // Ensure the wake lock turns back on if we focus the tab while messages are rolling
+      pokeWakeLock(300000);
     }
   });
 
@@ -195,6 +200,45 @@ function setupNetworkRecoveryHooks() {
 }
 
 // --- CORE APPLICATION UTILITIES ---
+
+// --- DYNAMIC SCREEN WAKE LOCK MANAGER ---
+let wakeLock = null;
+let wakeLockTimeoutId = null;
+
+async function requestWakeLock() {
+  if ('wakeLock' in navigator) {
+    try {
+      if (!wakeLock) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        console.log('[Wake Lock] Screen Wake Lock is active ☀️');
+        
+        wakeLock.addEventListener('release', () => {
+          console.log('[Wake Lock] Screen Wake Lock was released.');
+          wakeLock = null;
+        });
+      }
+    } catch (err) {
+      console.warn(`[Wake Lock] Failed to acquire lock: ${err.name}, ${err.message}`);
+    }
+  }
+}
+
+function releaseWakeLock() {
+  if (wakeLock) {
+    wakeLock.release();
+    wakeLock = null;
+    console.log('[Wake Lock] Screen Wake Lock released due to inactivity 🌙');
+  }
+}
+
+function pokeWakeLock(durationMs = 300000) {
+  requestWakeLock();
+
+  window.clearTimeout(wakeLockTimeoutId);
+  wakeLockTimeoutId = window.setTimeout(() => {
+    releaseWakeLock();
+  }, durationMs);
+}
 
 function showStatus(message, type = 'info') {
   statusBanner.textContent = message;
@@ -274,7 +318,7 @@ document.getElementById('add-btn').addEventListener('click', () => {
 
   socket.emit('add-source', newSource, (response) => {
     if (!response || !response.success) {
-      const message = response?.error || 'Unable to add source.';
+      const message = response?.error || 'Unable duly to add source.';
       showStatus(`Source error: ${message}`, 'error');
       return;
     }
@@ -429,11 +473,10 @@ function renderMessageToTimeline(msg) {
     return;
   }
   
-if (msg.platform === 'youtube') {
+  if (msg.platform === 'youtube') {
     let messageHtml = escapeHtml(msg.message);
 
     if (msg.emotes && Array.isArray(msg.emotes) && msg.emotes.length > 0) {
-
         const uniqueEmotes = new Map();
 
         for (const emote of msg.emotes) {
@@ -451,15 +494,8 @@ if (msg.platform === 'youtube') {
             .sort((a, b) => b.length - a.length);
 
         for (const code of sortedCodes) {
-
-            const escapedCodeForRegex =
-                code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-            const regex = new RegExp(
-                escapeHtml(escapedCodeForRegex),
-                'g'
-            );
-
+            const escapedCodeForRegex = code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(escapeHtml(escapedCodeForRegex), 'g');
             const emoteHtml =
                 `<img src="${uniqueEmotes.get(code)}"` +
                 ` alt="${escapeHtml(code)}"` +
@@ -487,7 +523,7 @@ if (msg.platform === 'youtube') {
     chatTimeline.appendChild(item);
     chatTimeline.scrollTop = chatTimeline.scrollHeight;
     return;
-}
+  }
   
   item.innerHTML = `
     <img src="${iconSrc}" class="platform-icon" alt="${msg.platform}">
