@@ -25,6 +25,22 @@ const providerClasses = {
   instagram: InstagramProvider,
 };
 
+// --- GLOBAL ROLLING HISTORY BUFFER ---
+// Maintains a central cache of the last 50 chats received across all active users/channels
+const CHAT_HISTORY_BUFFER = [];
+
+function archiveMessage(payload) {
+  CHAT_HISTORY_BUFFER.push(payload);
+  if (CHAT_HISTORY_BUFFER.length > 50) {
+    CHAT_HISTORY_BUFFER.shift(); // Evict the oldest entry to remain capped at 50
+  }
+}
+
+// REST Endpoint allowing the iPad to pull down recent historical content upon waking up
+app.get('/api/history', (req, res) => {
+  res.json({ success: true, history: CHAT_HISTORY_BUFFER });
+});
+
 io.on('connection', (socket) => {
   const activeSources = new Map();
 
@@ -69,12 +85,19 @@ io.on('connection', (socket) => {
     stopSource(id);
 
     const provider = new ProviderClass(normalizedTarget, (message) => {
-      socket.emit('chat-message', {
+      // Build full outbox message object
+      const fullMessagePayload = {
         sourceId: id,
         platform,
         target: normalizedTarget,
         ...message,
-      });
+      };
+
+      // Store in our history log so it can be requested via /api/history later
+      archiveMessage(fullMessagePayload);
+
+      // Distribute immediately to connected streaming frontends
+      socket.emit('chat-message', fullMessagePayload);
     });
 
     activeSources.set(id, provider);

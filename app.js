@@ -1,6 +1,10 @@
 let ACTIVE_PROFILE = null;
 let streamSources = JSON.parse(localStorage.getItem('chatSources')) || [];
 let socket; 
+let wakeLock = null; 
+
+// Track all rendered unique message IDs globally on the page to prevent duplication on catchup
+const renderedMessageIds = new Set();
 
 // --- DOM ELEMENTS ---
 const chatTimeline = document.getElementById('chat-timeline');
@@ -65,13 +69,18 @@ async function initializeProfile() {
   ACTIVE_PROFILE = PROFILES[matchedProfileKey];
   console.log(`[PROFILE ACTIVATED] Loading profile: ${matchedProfileKey}`);
 
-  // 1. Establish the connection
-  socket = io('https://live-chat-hub.onrender.com'); 
+  // Establish connection with built-in robust reconnection attempts configured
+  socket = io('https://live-chat-hub.onrender.com', {
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+    timeout: 20000
+  }); 
 
-  // 2. Bind your listeners safely now that socket exists!
   setupSocketListeners();
+  setupMobileKeepAlive(); // Initialize iPad wake lock and background event listeners
 
-  // Fallback to presets ONLY if the user hasn't saved custom sources yet
   if (streamSources.length === 0) {
     streamSources = ACTIVE_PROFILE.sources.map((src, index) => ({
       id: `profile-preset-${index}`,
@@ -86,15 +95,17 @@ async function initializeProfile() {
   return true;
 }
 
-// Group your event listeners inside this function so they don't break on page load
 function setupSocketListeners() {
-  // Global Message Pipeline Catchment
   socket.on('chat-message', (data) => {
     console.log('[FRONTEND INBOUND] Received chat message payload:', data);
     const currentConfig = streamSources.find((s) => s.id === data.sourceId);
     if (!currentConfig || currentConfig.isPaused) return;
 
-    // Play sound if NOT in a profile mode that mutes globally, AND the individual stream isn't muted
+    // Cache real-time message ID to prevent duplicates later
+    if (data && data.id) {
+      renderedMessageIds.add(data.id);
+    }
+
     const isGloballyMuted = ACTIVE_PROFILE && ACTIVE_PROFILE.globalMuted;
     if (!isGloballyMuted && !currentConfig.isMuted) {
       playNotificationSound();
@@ -103,7 +114,6 @@ function setupSocketListeners() {
     renderMessageToTimeline(data);
   });
 
-  // Socket connection handlers
   socket.on('connect', () => {
     console.log('Connected to server');
     showStatus('Connected to server ✓', 'info');
@@ -112,21 +122,79 @@ function setupSocketListeners() {
   socket.on('disconnect', (reason) => {
     console.log('Disconnected from server:', reason);
     if (reason === 'io server disconnect') {
-      showStatus('Disconnected from server. Please refresh the page.', 'error');
-    } else if (reason === 'io client disconnect') {
-      showStatus('Disconnected. Reconnecting...', 'info');
+      showStatus('Connection dropped by server. Retrying...', 'error');
+      socket.connect();
     } else {
-      showStatus(`Disconnected: ${reason}. Please check your connection and refresh if needed.`, 'error');
+      showStatus('Connection lost. Reconnecting...', 'error');
     }
   });
 
   socket.on('connect_error', (err) => {
     console.error('Connection error:', err);
-    showStatus('Unable to connect to server. Check your connection and refresh the page.', 'error');
+    showStatus('Reconnecting to live stream...', 'info');
   });
+}
 
-  socket.on('error', (err) => {
-    console.error('Socket error:', err);
+// --- IPAD KEEPALIVE & AUTOMATED HISTORICAL BACKFILL ENGINE ---
+function setupMobileKeepAlive() {
+  async function requestWakeLock() {
+    if ('wakeLock' in navigator) {
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        console.log('[Wake Lock] Screen kept active successfully.');
+      } catch (err) {
+        console.warn(`[Wake Lock] Activation skipped: ${err.message}`);
+      }
+    }
+  }
+
+  // Initial execution block
+  requestWakeLock();
+
+  // Watch for the iPad waking up or navigating back onto the tab layout
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'visible') {
+      console.log('[Visibility] iPad woke up. Initiating data restoration routine...');
+      
+      requestWakeLock(); // Renew screen wake-lock session
+
+      // 1. Force the active socket out of any latent/frozen state
+      if (!socket || !socket.connected) {
+        console.log('[Visibility] Stale socket detected. Forcing reconnection...');
+        showStatus('Restoring socket connection...', 'info');
+        socket.connect();
+      }
+
+      // 2. Fetch the latest 50 messages from the backend history buffer
+      try {
+        const response = await fetch('https://live-chat-hub.onrender.com/api/history');
+        const data = await response.json();
+
+        if (data && data.success && Array.isArray(data.history)) {
+          let backfilledCount = 0;
+
+          data.history.forEach((msg) => {
+            // Verify if source is currently added and unpaused
+            const currentConfig = streamSources.find((s) => s.id === msg.sourceId);
+            if (!currentConfig || currentConfig.isPaused) return;
+
+            // Skip rendering if this message is already on the iPad display
+            if (renderedMessageIds.has(msg.id)) return;
+
+            // Register and render the missing item
+            renderedMessageIds.add(msg.id);
+            renderMessageToTimeline(msg);
+            backfilledCount++;
+          });
+
+          if (backfilledCount > 0) {
+            showStatus(`Successfully backfilled ${backfilledCount} missed chats ✓`, 'info');
+          }
+        }
+      } catch (err) {
+        console.error('[History Sync] Catch-up log sync request failed:', err);
+      }
+    }
   });
 }
 
@@ -164,18 +232,15 @@ function playNotificationSound() {
   }
 }
 
-// Initialize App Configuration
 function init() {
   renderSourceCards();
   
-  // Show source manager by default if no sources exist
   if (streamSources.length === 0) {
     sourcePanel.classList.remove('hidden');
     sourcePanel.classList.add('visible');
     managerToggleBtn.textContent = '✕ Close Sources';
   }
   
-  // Connect existing storage instances back to your socket cluster on load
   streamSources.forEach((src) => {
     if (!src.isPaused) socket.emit('add-source', src);
   });
@@ -231,7 +296,6 @@ document.getElementById('add-btn').addEventListener('click', () => {
   });
 });
 
-// Platform selector dropdown configuration
 window.selectedPlatform = 'twitch';
 const platformToggleBtn = document.getElementById('platform-toggle-btn');
 const platformDropdown = document.getElementById('platform-dropdown');
@@ -302,7 +366,6 @@ function renderSourceCards() {
   });
 }
 
-// Parse Twitch emotes safely from right-to-left to avoid range mapping corruption
 function parseTwitchEmotes(message, emotesObj) {
   if (!emotesObj || typeof emotesObj !== 'object' || Object.keys(emotesObj).length === 0) {
     return escapeHtml(message);
@@ -323,7 +386,6 @@ function parseTwitchEmotes(message, emotesObj) {
     }
   }
 
-  // Sort descending by start position to safely split without affecting prior indexes
   replacements.sort((a, b) => b.start - a.start);
 
   let lastIdx = message.length;
@@ -353,7 +415,6 @@ function renderMessageToTimeline(msg) {
   const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const iconSrc = msg.iconUrl || platformIcons[msg.platform.toLowerCase()] || 'assets/twch_icon.png';
 
-  // --- TWITCH RENDERING PIPELINE ---
   if (msg.platform === 'twitch') {
     const messageHtml = parseTwitchEmotes(msg.message, msg.emotes);
     item.innerHTML = `
@@ -372,23 +433,15 @@ function renderMessageToTimeline(msg) {
     return;
   }
   
-// --- YOUTUBE RENDERING PIPELINE (FIXED) ---
   if (msg.platform === 'youtube') {
-    // Escape the message content first to neutralize dangerous HTML
     let messageHtml = escapeHtml(msg.message);
     
     if (msg.emotes && Array.isArray(msg.emotes)) {
-      // Sort by length descending so longer shortcodes are replaced before shorter fragments
       const sortedEmotes = [...msg.emotes].sort((a, b) => b.text.length - a.text.length);
       
       sortedEmotes.forEach(emote => {
-        // Find what the shortcode looks like AFTER going through escapeHtml
         const escapedShortcode = escapeHtml(emote.text);
-        
-        // Build the precise image element string
         const emoteHtml = `<img src="${emote.url}" alt="${escapedShortcode}" class="youtube-emote" title="${escapedShortcode}" style="height: 24px; vertical-align: middle; display: inline-block; margin: 0 2px;" loading="lazy">`;
-        
-        // Securely replace the escaped text with the clean image tags
         messageHtml = messageHtml.split(escapedShortcode).join(emoteHtml);
       });
     }
@@ -409,7 +462,6 @@ function renderMessageToTimeline(msg) {
     return;
   }
   
-  // --- FALLBACK FOR OTHER PLATFORMS ---
   item.innerHTML = `
     <img src="${iconSrc}" class="platform-icon" alt="${msg.platform}">
     <div class="chat-content">
@@ -432,7 +484,6 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-// Runtime Control Adjustments
 window.togglePause = (id) => {
   const src = streamSources.find((s) => s.id === id);
   if (!src) return;
@@ -468,7 +519,6 @@ window.removeSource = (id) => {
   }
 };
 
-// Theme preference toggles
 document.addEventListener('DOMContentLoaded', () => {
     const themeToggleBtn = document.getElementById('theme-toggle-btn');
     const body = document.body;
@@ -494,7 +544,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-// App Initiation Gateway
 initializeProfile().then((allowed) => {
   if (allowed) {
     init();
