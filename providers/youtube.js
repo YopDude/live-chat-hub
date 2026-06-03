@@ -88,10 +88,7 @@ class YouTubeProvider extends BaseProvider {
     return null;
   }
 
-/**
-   * Resolves the active live stream video ID using robust JSON extraction.
-   */
-/**
+  /**
    * Resolves the active live stream video ID using robust structural extraction.
    */
   async fetchChannelLiveStream(channelHandle) {
@@ -205,13 +202,43 @@ class YouTubeProvider extends BaseProvider {
   }
 
   normalizeText(runs) {
-    if (!runs) return '';
-    if (typeof runs === 'string') return runs;
+    if (!runs) return { text: '', emotes: [] };
+    if (typeof runs === 'string') return { text: runs, emotes: [] };
+    
+    let combinedText = '';
+    const emotes = [];
+
     if (Array.isArray(runs)) {
-      return runs.map((run) => run?.text || '').join('');
+      runs.forEach((run) => {
+        // If it's a plain text segment
+        if (run?.text) {
+          combinedText += run.text;
+        } 
+        // If it's a YouTube custom emote / emoji asset
+        else if (run?.emoji) {
+          const shortcut = run.emoji.isCustomEmoji ? run.emoji.shortcuts?.[0] : run.emoji.emojiId;
+          const label = shortcut || 'emoji';
+          
+          // Get the highest resolution thumbnail available for the asset
+          const thumbnails = run.emoji.image?.thumbnails || [];
+          const imageUrl = thumbnails[thumbnails.length - 1]?.url || '';
+
+          if (imageUrl) {
+            combinedText += label;
+            emotes.push({
+              text: label,
+              url: imageUrl
+            });
+          } else if (run.emoji.emojiId) {
+            combinedText += run.emoji.emojiId; // Fallback to raw unicode if no image link found
+          }
+        }
+      });
+      return { text: combinedText, emotes };
     }
-    if (runs.simpleText) return runs.simpleText;
-    return '';
+
+    if (runs.simpleText) return { text: runs.simpleText, emotes: [] };
+    return { text: '', emotes: [] };
   }
 
   normalizeAuthor(author) {
@@ -237,11 +264,18 @@ class YouTubeProvider extends BaseProvider {
 
     if (!textRenderer) return null;
 
-    const messageText =
-      this.normalizeText(textRenderer.message?.runs || textRenderer.message?.simpleText) ||
-      this.normalizeText(textRenderer.purchaseAmount?.simpleText) ||
-      this.normalizeText(textRenderer.headerSubtext?.runs) ||
-      this.normalizeText(textRenderer.authorName?.simpleText);
+    // Call updated text normalizer
+    const messageContent = this.normalizeText(textRenderer.message?.runs || textRenderer.message?.simpleText);
+    
+    // Fallbacks if message body is empty (e.g. standard paid stickers/memberships)
+    let finalMessage = messageContent.text;
+    let extractedEmotes = messageContent.emotes;
+    
+    if (!finalMessage) {
+      finalMessage = this.normalizeText(textRenderer.purchaseAmount?.simpleText).text ||
+                     this.normalizeText(textRenderer.headerSubtext?.runs).text ||
+                     this.normalizeText(textRenderer.authorName?.simpleText).text;
+    }
 
     const username = this.normalizeAuthor(textRenderer.authorName);
     const id = textRenderer.id || textRenderer.messageId || textRenderer.purchaseAmount?.runs?.[0]?.text || null;
@@ -251,13 +285,14 @@ class YouTubeProvider extends BaseProvider {
       item.liveChatMembershipItemRenderer,
     );
 
-    if (!messageText || !username) return null;
+    if (!finalMessage || !username) return null;
 
     return {
       id,
       platform: 'youtube',
       username,
-      message: messageText,
+      message: finalMessage,
+      emotes: extractedEmotes, // Send down collected emote objects to frontend
       timestamp: new Date().toISOString(),
       isSystemAlert,
       iconUrl: YOUTUBE_ICON_URL,

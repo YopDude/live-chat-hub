@@ -36,7 +36,7 @@ const PROFILES = {
 // 2. DEFINE HASHES FOR BOTH VALID PROFILE KEYS
 const PROFILE_HASHES = {
   '3c1bf06375a231a024e02ff86402e14dbfc91298a86178e197ceb4ae3630fef0': 'shiho',
-  '9bba5c53a0545e0c801155b4201a9a1305ad22ed9344c5505e26987483329054': 'tester'
+  '94ba85a49d1e443153077af8db2572562fb80bf61ee6010d867c2957b45f956c': 'tester'
 };
 
 const urlParams = new URLSearchParams(window.location.search);
