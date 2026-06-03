@@ -29,7 +29,7 @@ class FacebookProvider extends BaseProvider {
       
       this.browser = await puppeteer.launch({
         headless: "new",
-        executablePath: '/usr/bin/google-chrome', // 👈 ADD THIS: Tells it to use Render's built-in Chrome
+        executablePath: 'chrome',
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
