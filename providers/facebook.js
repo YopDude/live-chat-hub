@@ -1,4 +1,4 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
 const BaseProvider = require('./baseProvider');
 
 const FACEBOOK_ICON_URL = 'assets/fb_icon.png';
