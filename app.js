@@ -1,3 +1,7 @@
+let ACTIVE_PROFILE = null;
+let streamSources = [];
+let socket; //
+
 // --- DYNAMIC PROFILE CONFIGURATIONS ---
 const PROFILES = {
   shiho: {
@@ -43,33 +47,27 @@ async function sha256(text) {
 
 async function initializeProfile() {
   const suppliedHash = await sha256(suppliedProfile);
-
-  // 3. CHECK IF THE SUPPLIED HASH MATCHES ANY VALID PROFILE
   const matchedProfileKey = PROFILE_HASHES[suppliedHash];
 
   if (!matchedProfileKey) {
     document.body.innerHTML = `
-      <div style="
-        display:flex;
-        justify-content:center;
-        align-items:center;
-        height:100vh;
-        font-size:2rem;
-        font-family:sans-serif;
-        background-color: #1a202c;
-        color: #e2e8f0;
-      ">
+      <div style="display:flex;justify-content:center;align-items:center;height:100vh;font-size:2rem;font-family:sans-serif;background-color:#1a202c;color:#e2e8f0;">
         404 Not Found
       </div>
     `;
     return false;
   }
 
-  // 4. ASSIGN THE DYNAMIC MATCHED PROFILE
   ACTIVE_PROFILE = PROFILES[matchedProfileKey];
   console.log(`[PROFILE ACTIVATED] Loading profile: ${matchedProfileKey}`);
 
-  // Fallback to presets ONLY if the user hasn't saved custom sources yet
+  // 1. Establish the connection
+  socket = io('https://live-chat-hub.onrender.com'); 
+
+  // 2. Bind your listeners safely now that socket exists!
+  setupSocketListeners();
+
+  // Handle stream presets
   if (streamSources.length === 0) {
     streamSources = ACTIVE_PROFILE.sources.map((src, index) => ({
       id: `profile-preset-${index}`,
@@ -81,7 +79,43 @@ async function initializeProfile() {
     localStorage.setItem('chatSources', JSON.stringify(streamSources));
   }
 
+  // 3. Fire initial configurations to the backend
+  streamSources.forEach((source) => {
+    if (!source.isPaused) {
+      socket.emit('add-source', {
+        id: source.id,
+        platform: source.platform,
+        target: source.target
+      });
+    }
+  });
+
+  renderSourceCards();
   return true;
+}
+
+// Group your event listeners inside this function so they don't break on page load
+function setupSocketListeners() {
+  socket.on('chat-message', (data) => {
+    const source = streamSources.find((s) => s.id === data.sourceId);
+    if (source && source.isPaused) return; 
+    addMessageToTimeline(data);
+  });
+
+  socket.on('connect_error', (error) => {
+    console.error('Socket connection error:', error);
+    statusBanner.textContent = 'Connection lost. Retrying...';
+    statusBanner.style.display = 'block';
+  });
+
+  socket.on('connect', () => {
+    statusBanner.style.display = 'none';
+  });
+
+  socket.on('disconnect', () => {
+    statusBanner.textContent = 'Disconnected from server.';
+    statusBanner.style.display = 'block';
+  });
 }
 
 // --- CORE APPLICATION UTILITIES ---
