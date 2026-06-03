@@ -14,9 +14,9 @@ const PROFILES = {
   shiho: {
     globalMuted: true, // Globally mutes all alert sounds
     sources: [
-      { platform: 'youtube', target: '@shiho-tennyoza' },
+      { platform: 'youtube', target: 'shiho-tennyoza' },
       { platform: 'twitch',  target: 'shihoyabuki' },
-      { platform: 'tiktok',  target: '@shihoyabuki' }
+      { platform: 'tiktok',  target: 'shihoyabuki' }
     ]
   },
   tester: {
@@ -372,21 +372,24 @@ function renderMessageToTimeline(msg) {
     return;
   }
   
-  // --- YOUTUBE RENDERING PIPELINE ---
+// --- YOUTUBE RENDERING PIPELINE (FIXED) ---
   if (msg.platform === 'youtube') {
+    // Escape the message content first to neutralize dangerous HTML
     let messageHtml = escapeHtml(msg.message);
     
     if (msg.emotes && Array.isArray(msg.emotes)) {
-      // Sort custom shortcuts by length descending so that longer shortcuts (e.g., :smile-extra:) 
-      // are replaced before shorter parts of them (e.g., :smile:) can corrupt the text layout
+      // Sort by length descending so longer shortcodes are replaced before shorter fragments
       const sortedEmotes = [...msg.emotes].sort((a, b) => b.text.length - a.text.length);
       
       sortedEmotes.forEach(emote => {
-        const safeText = escapeHtml(emote.text);
-        const emoteHtml = `<img src="${emote.url}" alt="${safeText}" class="youtube-emote" title="${safeText}" style="height: 24px; vertical-align: middle; display: inline-block; margin: 0 2px;" loading="lazy">`;
+        // Find what the shortcode looks like AFTER going through escapeHtml
+        const escapedShortcode = escapeHtml(emote.text);
         
-        // Match string fragments exactly and overwrite with true DOM image components
-        messageHtml = messageHtml.replaceAll(safeText, emoteHtml);
+        // Build the precise image element string
+        const emoteHtml = `<img src="${emote.url}" alt="${escapedShortcode}" class="youtube-emote" title="${escapedShortcode}" style="height: 24px; vertical-align: middle; display: inline-block; margin: 0 2px;" loading="lazy">`;
+        
+        // Securely replace the escaped text with the clean image tags
+        messageHtml = messageHtml.split(escapedShortcode).join(emoteHtml);
       });
     }
 
