@@ -19,11 +19,9 @@ const PROFILES = {
       { platform: 'tiktok',  target: '@shihoyabuki' }
     ]
   },
-  // 1. ADD YOUR TESTER CONFIGURATION HERE
   tester: {
     globalMuted: false, // Keep sound on so you can test audio notifications!
     sources: [
-      // Put large, constantly active channels here so you always have live chat data to test with
       { platform: 'twitch',  target: 'tharixer' },
       { platform: 'twitch',  target: 'gumi772' }
     ]
@@ -33,7 +31,6 @@ const PROFILES = {
 // --------------------------------------------------
 // PROFILE ACCESS CONTROL
 // --------------------------------------------------
-// 2. DEFINE HASHES FOR BOTH VALID PROFILE KEYS
 const PROFILE_HASHES = {
   '3c1bf06375a231a024e02ff86402e14dbfc91298a86178e197ceb4ae3630fef0': 'shiho',
   '94ba85a49d1e443153077af8db2572562fb80bf61ee6010d867c2957b45f956c': 'tester'
@@ -356,6 +353,7 @@ function renderMessageToTimeline(msg) {
   const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const iconSrc = msg.iconUrl || platformIcons[msg.platform.toLowerCase()] || 'assets/twch_icon.png';
 
+  // --- TWITCH RENDERING PIPELINE ---
   if (msg.platform === 'twitch') {
     const messageHtml = parseTwitchEmotes(msg.message, msg.emotes);
     item.innerHTML = `
@@ -374,6 +372,41 @@ function renderMessageToTimeline(msg) {
     return;
   }
   
+  // --- YOUTUBE RENDERING PIPELINE ---
+  if (msg.platform === 'youtube') {
+    let messageHtml = escapeHtml(msg.message);
+    
+    if (msg.emotes && Array.isArray(msg.emotes)) {
+      // Sort custom shortcuts by length descending so that longer shortcuts (e.g., :smile-extra:) 
+      // are replaced before shorter parts of them (e.g., :smile:) can corrupt the text layout
+      const sortedEmotes = [...msg.emotes].sort((a, b) => b.text.length - a.text.length);
+      
+      sortedEmotes.forEach(emote => {
+        const safeText = escapeHtml(emote.text);
+        const emoteHtml = `<img src="${emote.url}" alt="${safeText}" class="youtube-emote" title="${safeText}" style="height: 24px; vertical-align: middle; display: inline-block; margin: 0 2px;" loading="lazy">`;
+        
+        // Match string fragments exactly and overwrite with true DOM image components
+        messageHtml = messageHtml.replaceAll(safeText, emoteHtml);
+      });
+    }
+
+    item.innerHTML = `
+      <img src="${iconSrc}" class="platform-icon" alt="${msg.platform}">
+      <div class="chat-content">
+        <div class="chat-header">
+          <span class="chat-username">${escapeHtml(msg.username)}</span>
+          <span class="chat-platform">${escapeHtml(msg.platform)}</span>
+          <span class="chat-timestamp">${time}</span>
+        </div>
+        <div class="chat-text">${messageHtml}</div>
+      </div>
+    `;
+    chatTimeline.appendChild(item);
+    chatTimeline.scrollTop = chatTimeline.scrollHeight;
+    return;
+  }
+  
+  // --- FALLBACK FOR OTHER PLATFORMS ---
   item.innerHTML = `
     <img src="${iconSrc}" class="platform-icon" alt="${msg.platform}">
     <div class="chat-content">
