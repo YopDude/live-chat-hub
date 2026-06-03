@@ -1,6 +1,6 @@
 let ACTIVE_PROFILE = null;
 let streamSources = [];
-let socket; //
+let socket; 
 
 // --- DYNAMIC PROFILE CONFIGURATIONS ---
 const PROFILES = {
@@ -96,25 +96,51 @@ async function initializeProfile() {
 
 // Group your event listeners inside this function so they don't break on page load
 function setupSocketListeners() {
+  // Global Message Pipeline Catchment
   socket.on('chat-message', (data) => {
-    const source = streamSources.find((s) => s.id === data.sourceId);
-    if (source && source.isPaused) return; 
-    addMessageToTimeline(data);
+    console.log('[FRONTEND INBOUND] Received chat message payload:', data);
+    const currentConfig = streamSources.find((s) => s.id === data.sourceId);
+    if (!currentConfig || currentConfig.isPaused) return;
+
+    // Play sound if NOT in a profile mode that mutes globally, AND the individual stream isn't muted
+    const isGloballyMuted = ACTIVE_PROFILE && ACTIVE_PROFILE.globalMuted;
+    if (!isGloballyMuted && !currentConfig.isMuted) {
+      playNotificationSound();
+    }
+
+    renderMessageToTimeline(data);
   });
 
-  socket.on('connect_error', (error) => {
-    console.error('Socket connection error:', error);
-    statusBanner.textContent = 'Connection lost. Retrying...';
-    statusBanner.style.display = 'block';
-  });
-
+  // Socket connection handlers
   socket.on('connect', () => {
+    console.log('Connected to server');
+    showStatus('Connected to server ✓', 'info');
     statusBanner.style.display = 'none';
   });
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', (reason) => {
+    console.log('Disconnected from server:', reason);
     statusBanner.textContent = 'Disconnected from server.';
     statusBanner.style.display = 'block';
+
+    if (reason === 'io server disconnect') {
+      showStatus('Disconnected from server. Please refresh the page.', 'error');
+    } else if (reason === 'io client disconnect') {
+      showStatus('Disconnected. Reconnecting...', 'info');
+    } else {
+      showStatus(`Disconnected: ${reason}. Please check your connection and refresh if needed.`, 'error');
+    }
+  });
+
+  socket.on('connect_error', (err) => {
+    console.error('Connection error:', err);
+    statusBanner.textContent = 'Connection lost. Retrying...';
+    statusBanner.style.display = 'block';
+    showStatus('Unable to connect to server. Check your connection and refresh the page.', 'error');
+  });
+
+  socket.on('error', (err) => {
+    console.error('Socket error:', err);
   });
 }
 
@@ -168,47 +194,6 @@ function init() {
     if (!src.isPaused) socket.emit('add-source', src);
   });
 }
-
-// Global Message Pipeline Catchment
-socket.on('chat-message', (data) => {
-  console.log('[FRONTEND INBOUND] Received chat message payload:', data);
-  const currentConfig = streamSources.find((s) => s.id === data.sourceId);
-  if (!currentConfig || currentConfig.isPaused) return;
-
-  // Play sound if NOT in a profile mode that mutes globally, AND the individual stream isn't muted
-  const isGloballyMuted = ACTIVE_PROFILE && ACTIVE_PROFILE.globalMuted;
-  if (!isGloballyMuted && !currentConfig.isMuted) {
-    playNotificationSound();
-  }
-
-  renderMessageToTimeline(data);
-});
-
-// Socket connection handlers
-socket.on('connect', () => {
-  console.log('Connected to server');
-  showStatus('Connected to server ✓', 'info');
-});
-
-socket.on('disconnect', (reason) => {
-  console.log('Disconnected from server:', reason);
-  if (reason === 'io server disconnect') {
-    showStatus('Disconnected from server. Please refresh the page.', 'error');
-  } else if (reason === 'io client disconnect') {
-    showStatus('Disconnected. Reconnecting...', 'info');
-  } else {
-    showStatus(`Disconnected: ${reason}. Please check your connection and refresh if needed.`, 'error');
-  }
-});
-
-socket.on('connect_error', (err) => {
-  console.error('Connection error:', err);
-  showStatus('Unable to connect to server. Check your connection and refresh the page.', 'error');
-});
-
-socket.on('error', (err) => {
-  console.error('Socket error:', err);
-});
 
 // --- UI EVENT HANDLERS & MANAGEMENT ---
 
