@@ -1,6 +1,13 @@
 let ACTIVE_PROFILE = null;
-let streamSources = [];
+let streamSources = JSON.parse(localStorage.getItem('chatSources')) || [];
 let socket; 
+
+// --- DOM ELEMENTS ---
+const chatTimeline = document.getElementById('chat-timeline');
+const statusBanner = document.getElementById('status-banner');
+const sourcePanel = document.getElementById('source-manager-panel');
+const managerToggleBtn = document.getElementById('manager-toggle-btn');
+const closePanelBtn = document.getElementById('close-panel-btn');
 
 // --- DYNAMIC PROFILE CONFIGURATIONS ---
 const PROFILES = {
@@ -67,7 +74,7 @@ async function initializeProfile() {
   // 2. Bind your listeners safely now that socket exists!
   setupSocketListeners();
 
-  // Handle stream presets
+  // Fallback to presets ONLY if the user hasn't saved custom sources yet
   if (streamSources.length === 0) {
     streamSources = ACTIVE_PROFILE.sources.map((src, index) => ({
       id: `profile-preset-${index}`,
@@ -79,18 +86,6 @@ async function initializeProfile() {
     localStorage.setItem('chatSources', JSON.stringify(streamSources));
   }
 
-  // 3. Fire initial configurations to the backend
-  streamSources.forEach((source) => {
-    if (!source.isPaused) {
-      socket.emit('add-source', {
-        id: source.id,
-        platform: source.platform,
-        target: source.target
-      });
-    }
-  });
-
-  renderSourceCards();
   return true;
 }
 
@@ -115,14 +110,10 @@ function setupSocketListeners() {
   socket.on('connect', () => {
     console.log('Connected to server');
     showStatus('Connected to server ✓', 'info');
-    statusBanner.style.display = 'none';
   });
 
   socket.on('disconnect', (reason) => {
     console.log('Disconnected from server:', reason);
-    statusBanner.textContent = 'Disconnected from server.';
-    statusBanner.style.display = 'block';
-
     if (reason === 'io server disconnect') {
       showStatus('Disconnected from server. Please refresh the page.', 'error');
     } else if (reason === 'io client disconnect') {
@@ -134,8 +125,6 @@ function setupSocketListeners() {
 
   socket.on('connect_error', (err) => {
     console.error('Connection error:', err);
-    statusBanner.textContent = 'Connection lost. Retrying...';
-    statusBanner.style.display = 'block';
     showStatus('Unable to connect to server. Check your connection and refresh the page.', 'error');
   });
 
