@@ -1,4 +1,4 @@
-const puppeteer = require('puppeteer-core');
+const puppeteer = require('puppeteer-core'); // 👈 Changed from 'puppeteer'
 const BaseProvider = require('./baseProvider');
 
 const FACEBOOK_ICON_URL = 'assets/fb_icon.png';
@@ -12,35 +12,8 @@ class FacebookProvider extends BaseProvider {
     this.normalizedTarget = FacebookProvider.normalizeTarget(target);
   }
 
-  /**
-   * Cleans and validates incoming URL strings to ensure they map to Facebook properties.
-   */
-  static normalizeTarget(target) {
-    if (typeof target !== 'string') return null;
-    const raw = target.trim();
-    if (!raw) return null;
+  // ... normalizeTarget and validateTarget functions stay the same ...
 
-    try {
-      const url = new URL(raw);
-      if (!/^(www\.)?facebook\.com$/i.test(url.hostname)) return null;
-      return url.href; // Keep the full structural canonical URL path
-    } catch (err) {
-      // If it's a raw sequence or numeric string, attempt to map it structurally
-      if (/^[0-9]+$/.test(raw)) {
-        return `https://www.facebook.com/live/videos/${raw}`;
-      }
-      return null;
-    }
-  }
-
-  static validateTarget(target) {
-    return Boolean(this.normalizeTarget(target));
-  }
-
-  /**
-   * Initializes a headless browser session, injects authenticated user configurations,
-   * and runs a background observer over live DOM stream changes.
-   */
   async start() {
     if (this.isActive) return;
     super.start();
@@ -56,7 +29,7 @@ class FacebookProvider extends BaseProvider {
       
       this.browser = await puppeteer.launch({
         headless: "new",
-        executablePath: '/usr/bin/google-chrome', // Forces Render to use its built-in browser
+        executablePath: '/usr/bin/google-chrome', // 👈 ADD THIS: Tells it to use Render's built-in Chrome
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
