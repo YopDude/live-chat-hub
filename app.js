@@ -18,9 +18,8 @@ const PROFILES = {
     globalMuted: true, // Globally mutes all alert sounds
     sources: [
       { platform: 'youtube', target: '@shiho-tennyoza' },
-      { platform: 'youtube', target: '@Abracafaget' },
       { platform: 'twitch',  target: 'shihoyabuki' },
-      { platform: 'tiktok',  target: '@shihoyabuki' }
+      { platform: 'tiktok',  target: 'shihoyabuki' }
     ]
   },
   tester: {

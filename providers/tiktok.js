@@ -41,7 +41,6 @@ class TikTokProvider extends BaseProvider {
       this.onMessage({
         id: `tiktok_${Date.now()}_${this.messageCounter}`,
         platform: 'tiktok',
-        // Swapped to prioritize nickname (Display Name) over uniqueId
         username: data.nickname || data.uniqueId || 'TikTok User',
         message: data.comment || '',
         timestamp: new Date().toISOString(),
@@ -51,15 +50,24 @@ class TikTokProvider extends BaseProvider {
     });
 
     this.connection.on('gift', (data) => {
+      // If the gift is part of a streak and hasn't finished yet, skip it.
+      // This stops the same gift event from flooding the app multiple times.
+      if (data.giftType === 1 && !data.repeatEnd) {
+        return;
+      }
+
       this.messageCounter++;
       const giftName = data.giftName || 'Gift';
-      // Swapped here as well to keep consistency
       const username = data.nickname || data.uniqueId || 'TikTok User';
+      
+      // Determine if we should show a multiplier (e.g., "sent a Rose x5!")
+      const countLabel = data.repeatCount > 1 ? ` x${data.repeatCount}` : '';
+
       this.onMessage({
         id: `tiktok_gift_${Date.now()}_${this.messageCounter}`,
         platform: 'tiktok',
         username,
-        message: `${username} sent a ${giftName}!`,
+        message: `${username} sent a ${giftName}${countLabel}!`,
         timestamp: new Date().toISOString(),
         isSystemAlert: true,
         iconUrl: TIKTOK_ICON_URL,
